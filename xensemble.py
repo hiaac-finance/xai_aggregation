@@ -83,7 +83,7 @@ class FeatureImportanceCalculator():
                     referenced_feature = expression_element
                     break
 
-            rule_coverage = X_train.query(rule).shape[0] / X_train.shape[0]
+            rule_coverage = self.X_train.query(rule).shape[0] / self.X_train.shape[0]
             feature_importances[referenced_feature] = 1 - rule_coverage
         
         return pd.DataFrame(list(feature_importances.items()), columns=['feature', 'score']).sort_values(by='score', ascending=False).reset_index(drop=True)
@@ -148,11 +148,6 @@ def get_noisy_data(X: pd.DataFrame, categorical_features_names: list[str], encod
 
     return X_noisy
 
-class EnsembleExplanation:
-    def __init__(self, result: pd.DataFrame, explanation_components: list[pd.DataFrame]):
-        self.result = result
-        self.explanation_components = explanation_components
-
 class EnsembleExplainer:
     def __init__(self, X_train_preprocessed: pd.DataFrame | np.ndarray, categorical_features_names: list[str],
                  clf: RandomForestClassifier, predict_proba_function: callable = None):
@@ -170,6 +165,7 @@ class EnsembleExplainer:
             "anchor": []
         }
     
+    @staticmethod
     def _robustness_metrics(ranking_original: pd.DataFrame, ranking_noisy: pd.DataFrame) -> pd.DataFrame:
         """
         Returns a DataFrame with 4 robustness metrics of a given feature importance ranking:
@@ -222,6 +218,7 @@ class EnsembleExplainer:
         # Calculate metrics context:
         self._calculte_metrics_context()
     
+    @staticmethod
     def _normalize_metrics(instance_metrics: pd.Series, context_metrics: pd.DataFrame) -> pd.DataFrame:
         """
         Returns a DataFrame with the normalized metrics.
@@ -231,7 +228,7 @@ class EnsembleExplainer:
 
         return normalized_metrics
 
-    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> EnsembleExplanation:
+    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
         # Getting weights for each explanation method:
 
         lime_ranking = self.original_fic.get_lime_ranking(instance_data_row)
