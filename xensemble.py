@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from tools.topsis import Topsis
 
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.model_selection import train_test_split
@@ -38,6 +39,7 @@ class FeatureImportanceCalculator():
 
 
     def get_lime_ranking(self, instance_data_row) -> pd.DataFrame:
+
         """
         Returns a DataFrame with the feature importance ranking using LIME, ordered by abs(importance).
         """
@@ -148,13 +150,26 @@ def get_noisy_data(X: pd.DataFrame, categorical_features_names: list[str], encod
 
     return X_noisy
 
+
+class EnsembleExplanation:
+    def __init__(self, results: pd.DataFrame, weights: dict[str, float]):
+        self.results = results
+        self.weights = weights
+    
+    def __str__(self):
+        return self.results.__str__()
+    
+    def __repr__(self):
+        return self.results.__repr__()
+
 class EnsembleExplainer:
     def __init__(self, X_train_preprocessed: pd.DataFrame | np.ndarray, categorical_features_names: list[str],
-                 clf: RandomForestClassifier, predict_proba_function: callable = None):
+                 clf: RandomForestClassifier, predict_proba_function: callable = None, **kwargs):
         self.X_train = X_train_preprocessed
         self.categorical_features_names = categorical_features_names
         self.clf = clf
         self.predict_proba_function = predict_proba_function
+        self._get_noisy_data_params = kwargs.get('get_noisy_data_params', {}) # optional parameters to be passed to get_noisy_data()
 
         self.original_fic = FeatureImportanceCalculator(self.clf, self.X_train, self.predict_proba_function)
         self.noisy_fic = None
@@ -195,64 +210,75 @@ class EnsembleExplainer:
 
         return robustness_metrics
     
-    def _calculte_metrics_context(self):
-        for i in range(len(self.X_train)): 
-            lime_ranking = self.original_fic.get_lime_ranking(self.X_train.iloc[i])
-            lime_ranking_noisy = self.noisy_fic.get_lime_ranking(self.X_train_noisy.iloc[i])
-
-            shap_ranking = self.original_fic.get_shap_ranking(self.X_train.iloc[i], explainer_type=shap.TreeExplainer)
-            shap_ranking_noisy = self.noisy_fic.get_shap_ranking(self.X_train_noisy.iloc[i], explainer_type=shap.TreeExplainer)
-
-            anchor_ranking = self.original_fic.get_anchor_ranking(self.X_train.iloc[i])
-            anchor_ranking_noisy = self.noisy_fic.get_anchor_ranking(self.X_train_noisy.iloc[i])
-
-            self.metrics_context['lime'].append(self._robustness_metrics(lime_ranking, lime_ranking_noisy))
-            self.metrics_context['shap'].append(self._robustness_metrics(shap_ranking, shap_ranking_noisy))
-            self.metrics_context['anchor'].append(self._robustness_metrics(anchor_ranking, anchor_ranking_noisy))
-
     def init(self):
         # Obtain noisy variation of needed tools:
-        self.X_train_noisy = get_noisy_data(self.X_train, self.categorical_features_names)
+        self.X_train_noisy = get_noisy_data(self.X_train, self.categorical_features_names, **self._get_noisy_data_params)
         self.noisy_fic = FeatureImportanceCalculator(self.clf, self.X_train_noisy, self.predict_proba_function)
-
-        # Calculate metrics context:
-        self._calculte_metrics_context()
     
     @staticmethod
-    def _normalize_metrics(instance_metrics: pd.Series, context_metrics: pd.DataFrame) -> pd.DataFrame:
+    def _compute_weights(lime_instance_metrics: pd.DataFrame, shap_instance_metrics: pd.DataFrame, anchor_instance_metrics: pd.DataFrame) -> tuple[float, float, float]:
         """
-        Returns a DataFrame with the normalized metrics.
+        Returns the weights for each explanation method based on the robustness metrics. The weights are calculated using the TOPSIS method.
+        reference: https://en.wikipedia.org/wiki/TOPSIS
+
+        Parameters:
+        lime_instance_metrics (pd.DataFrame): DataFrame containing robustness metrics for LIME explanations (obtained from FeatureImportanceCalculator).
+        shap_instance_metrics (pd.DataFrame): DataFrame containing robustness metrics for SHAP explanations (obtained from FeatureImportanceCalculator).
+        anchor_instance_metrics (pd.DataFrame): DataFrame containing robustness metrics for Anchor explanations (obtained from FeatureImportanceCalculator).
+        Returns:
+        tuple[float, float, float]: A tuple containing the weights for LIME, SHAP, and Anchor explanations respectively.
         """
+        
+        evaluation_matrix = np.array([
+            lime_instance_metrics.values.flatten(),
+            shap_instance_metrics.values.flatten(),
+            anchor_instance_metrics.values.flatten()
+        ])
 
-        normalized_metrics = (instance_metrics - context_metrics.min()) / (context_metrics.max() - context_metrics.min())
+        robustness_metrics_weights = [
+            0.25, # mean squared difference
+            0.25, # mean absolute difference
+            0.25, # spearman correlation
+            0.25  # pearson correlation
+        ]
 
-        return normalized_metrics
+        # if higher value is preferred - True
+        # if lower value is preferred - False
+        criterias = np.array([
+            False,  # For mean_squared_difference, lower is better
+            False,  # For mean_absolute_difference, lower is better
+            True,   # For spearman_correlation, higher is better
+            True    # For pearson_correlation, higher is better
+        ])
 
-    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+        t = Topsis(evaluation_matrix, robustness_metrics_weights, criterias, debug=False)
+        t.calc()
+
+        lime_weight, shap_weight, anchor_weight = t.best_similarity # redundant code, but it's easier to understand
+        return lime_weight, shap_weight, anchor_weight
+
+    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> EnsembleExplanation:
         # Getting weights for each explanation method:
 
         lime_ranking = self.original_fic.get_lime_ranking(instance_data_row)
         lime_ranking_noisy = self.noisy_fic.get_lime_ranking(instance_data_row)
         lime_instance_metrics = self._robustness_metrics(lime_ranking, lime_ranking_noisy)
-        lime_normalized_metrics = self._normalize_metrics(lime_instance_metrics, self.metrics_context['lime'])
-        lime_weight = lime_normalized_metrics.mean()
 
         shap_ranking = self.original_fic.get_shap_ranking(instance_data_row, explainer_type=shap.TreeExplainer)
         shap_ranking_noisy = self.noisy_fic.get_shap_ranking(instance_data_row, explainer_type=shap.TreeExplainer)
         shap_instance_metrics = self._robustness_metrics(shap_ranking, shap_ranking_noisy)
-        shap_normalized_metrics = self._normalize_metrics(shap_instance_metrics, self.metrics_context['shap'])
-        shap_weight = shap_normalized_metrics.mean()
 
         anchor_ranking = self.original_fic.get_anchor_ranking(instance_data_row)
         anchor_ranking_noisy = self.noisy_fic.get_anchor_ranking(instance_data_row)
         anchor_instance_metrics = self._robustness_metrics(anchor_ranking, anchor_ranking_noisy)
-        anchor_normalized_metrics = self._normalize_metrics(anchor_instance_metrics, self.metrics_context['anchor'])
-        anchor_weight = anchor_normalized_metrics.mean()
+
+        lime_weight, shap_weight, anchor_weight = self._compute_weights(lime_instance_metrics, shap_instance_metrics, anchor_instance_metrics)
 
         result = lime_ranking.merge(shap_ranking, on='feature', how='outer', suffixes=('_lime', '_shap'))
         result = result.merge(anchor_ranking, on='feature', how='outer', suffixes=('_lime', '_shap'))
         result = result.rename(columns={'score': 'score_anchor'})
-        result['score_ensenmble'] = lime_weight * result['score_lime'] + shap_weight * result['score_shap'] + anchor_weight * result['score_anchor']
+        result['score_ensemble'] = lime_weight * result['score_lime'] + shap_weight * result['score_shap'] + anchor_weight * result['score_anchor']
         result = result.sort_values(by='score_ensemble', ascending=False).reset_index(drop=True)
 
-        return result
+        explanation = EnsembleExplanation(result, {'lime': lime_weight, 'shap': shap_weight, 'anchor': anchor_weight})
+        return explanation
