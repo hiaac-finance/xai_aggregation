@@ -20,6 +20,7 @@ from tensorflow.keras.optimizers import Adam
 
 # MCDM:
 from tools.topsis import Topsis
+import pymcdm
 
 # ranking tools:
 import ranx
@@ -395,7 +396,7 @@ class AggregatedExplainer(ExplainerWrapper):
         return ranx.Run.from_df(feature_importance_ranking, q_id_col="query", doc_id_col="feature", score_col="score")
     
     @staticmethod
-    def _get_weights(instance_explanation_metrics: pd.DataFrame, higher_is_better: list[bool]) -> list[float]:
+    def _get_weights(instance_explanation_metrics: pd.DataFrame, higher_is_better: list[bool]) -> np.ndarray[float]:
         """
         Uses a MCDM algorithm to calculate the weights for each explanation method based on the instance explanation metrics.
 
@@ -407,12 +408,17 @@ class AggregatedExplainer(ExplainerWrapper):
         evaluation_matrix = instance_explanation_metrics.to_numpy()
 
         num_metrics = evaluation_matrix.shape[1]
-        topsis_weights = [1/num_metrics for _ in range(num_metrics)]
+        mcdm_criteria_weights = pymcdm.weights.equal_weights(evaluation_matrix)
 
-        t = Topsis(evaluation_matrix, topsis_weights, higher_is_better, debug=False)
-        t.calc()
+        mcdm_criteria_types = np.array([1 if x else -1 for x in higher_is_better])
 
-        return t.worst_similarity # TODO: check if this is the correct attribute to return
+        # t = Topsis(evaluation_matrix, mcdm_criteria_weights, higher_is_better, debug=False)
+        # t.calc()
+
+        # return t.worst_similarity # TODO: check if this is the correct attribute to return
+
+        mcdm_method = pymcdm.methods.TOPSIS()
+        return mcdm_method(evaluation_matrix, mcdm_criteria_weights, mcdm_criteria_types)
 
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
         runs = []
@@ -426,6 +432,7 @@ class AggregatedExplainer(ExplainerWrapper):
                 self.xai_evaluator.sensitivity(explainer, instance_data_row, iterations=10),
                 self.xai_evaluator.complexity(explainer, instance_data_row)
             ]
+        
         self.last_explanation_metrics = instance_explanation_metrics
 
         weights = self._get_weights(instance_explanation_metrics, [True, True, False])
