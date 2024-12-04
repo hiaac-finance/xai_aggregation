@@ -7,3 +7,5 @@ alibi
 scipy
 tensorflow
 tf-keras
+pathos
+ranx
