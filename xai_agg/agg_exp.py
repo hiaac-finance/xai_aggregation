@@ -8,7 +8,6 @@ from .explainers import *
 from .tools import *
 
 # MCDM:
-from tools.topsis import Topsis
 import pymcdm
 
 # ranking tools:

@@ -23,6 +23,9 @@ from pathos.multiprocessing import ProcessingPool as Pool
 # from pathos.multiprocessing import ThreadPool as Pool
 # from multiprocessing import Pool as ProcessPool
 
+# import multiprocess.context as ctx
+# ctx._force_start_method('spawn')
+
 
 class AutoencoderNoisyDataGenerator():
     """
