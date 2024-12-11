@@ -9,6 +9,7 @@ from .tools import *
 
 # MCDM:
 import pymcdm
+from pymcdm.methods.mcda_method import MCDA_method
 
 # ranking tools:
 import ranx
@@ -37,7 +38,8 @@ class AggregatedExplainer(ExplainerWrapper):
     """
 
     def __init__(self, explainer_types: list[Type[ExplainerWrapper]], clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None,
-                 explainer_params_list: dict[Type[ExplainerWrapper], dict] = None, aggregation_algorithm: Literal["wsum", "w_bordafuse", "w_condorcet"] = "wsum", **kwargs):
+                 explainer_params_list: dict[Type[ExplainerWrapper], dict] = None,
+                 mcdm_method: MCDA_method = pymcdm.methods.TOPSIS(), aggregation_algorithm: Literal["wsum", "w_bordafuse", "w_condorcet"] = "wsum", **kwargs):
         super().__init__(clf, X_train, categorical_feature_names, predict_proba)
 
         self.explainers = []
@@ -50,7 +52,8 @@ class AggregatedExplainer(ExplainerWrapper):
         else:
             self.xai_evaluator = ExplanationModelEvaluator(clf, X_train, categorical_feature_names, self.predict_proba, kwargs.get('noise_gen_args', {}), **kwargs.get('evaluator_args', {}))
             self.xai_evaluator.init()
-
+        
+        self.mcdm_method = mcdm_method
         self.aggregation_algorithm = aggregation_algorithm
 
         self.last_explanation_metrics: pd.DataFrame = None
@@ -60,8 +63,7 @@ class AggregatedExplainer(ExplainerWrapper):
         feature_importance_ranking["query"] = "1"
         return ranx.Run.from_df(feature_importance_ranking, q_id_col="query", doc_id_col="feature", score_col="score")
     
-    @staticmethod
-    def _get_weights(instance_explanation_metrics: pd.DataFrame, higher_is_better: list[bool]) -> np.ndarray[float]:
+    def _get_weights(self, instance_explanation_metrics: pd.DataFrame, higher_is_better: list[bool]) -> np.ndarray[float]:
         """
         Uses a MCDM algorithm to calculate the weights for each explanation method based on the instance explanation metrics.
 
@@ -77,13 +79,7 @@ class AggregatedExplainer(ExplainerWrapper):
 
         mcdm_criteria_types = np.array([1 if x else -1 for x in higher_is_better])
 
-        # t = Topsis(evaluation_matrix, mcdm_criteria_weights, higher_is_better, debug=False)
-        # t.calc()
-
-        # return t.worst_similarity # TODO: check if this is the correct attribute to return
-
-        mcdm_method = pymcdm.methods.TOPSIS()
-        return mcdm_method(evaluation_matrix, mcdm_criteria_weights, mcdm_criteria_types)
+        return self.mcdm_method(evaluation_matrix, mcdm_criteria_weights, mcdm_criteria_types)
 
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
         runs = []

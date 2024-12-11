@@ -5,6 +5,11 @@ from alibi.explainers import AnchorTabular # why not used the original anchor pa
 import numpy as np
 import pandas as pd
 
+"""
+This script defines the ExplainerWrapper abstract base class and its subclasses, which are used to wrap the explainer classes,
+such as the ones from the LIME, SHAP, and Anchor libraries.
+"""
+
 class ExplainerWrapper:
     """
     Wrapper abstract base class for featuer-importance-based explainer classes.
@@ -26,6 +31,10 @@ class ExplainerWrapper:
 
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+        """
+        Explains the prediction of a single instance. Must return a DataFrame with two columns: 'feature' and 'score',
+        where 'feature' is the name of the feature and 'score' is the absolute feature importance score.
+        """
         pass
 
 class LimeWrapper(ExplainerWrapper):
@@ -38,7 +47,8 @@ class LimeWrapper(ExplainerWrapper):
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
         lime_exp = self.explainer.explain_instance(instance_data_row, self.predict_proba, num_features=len(self.X_train.columns))
         
-        ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])
+        ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])    
+        ranking['score'] = ranking['score'].apply(lambda x: abs(x))
         return ranking
 
 class ShapTabularTreeWrapper(ExplainerWrapper):
@@ -53,7 +63,7 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
     
             ranking = pd.DataFrame(list(zip(self.X_train.columns, shap_values[:, 0])), columns=['feature', 'score'])
             ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
-            
+            ranking['score'] = ranking['score'].apply(lambda x: abs(x))
             return ranking
 
 class AnchorWrapper(ExplainerWrapper):
