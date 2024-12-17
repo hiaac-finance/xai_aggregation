@@ -12,6 +12,7 @@ def evaluate_aggregate_explainer(
         mcdm_algs: list[MCDA_method] = [pymcdm.methods.TOPSIS()],
         aggregation_algs: list[Literal["wsum", "w_bordafuse", "w_condorcet"]] = ["wsum"],
         metrics_sets: list[list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc']]] = [['nrc', 'sensitivity_spearman', 'faithfulness_corr']],
+        extra_explainer_params: dict = {},
         n_instances: int = 10, indexes: list[int] = None,
         random_state: int = 42, mp_jobs = 10, **kwargs) -> list[list[pd.DataFrame]]:
     
@@ -93,7 +94,11 @@ def evaluate_aggregate_explainer(
             for mcdm_alg in mcdm_algs:
                 for aggregation_alg in aggregation_algs:
                     print(f"Running evaluation for settings {i + 1}/{len(explainer_components_sets) * len(metrics_sets) * len(mcdm_algs) * len(aggregation_algs)}")
-                    explainer = AggregatedExplainer(clf=clf, X_train=X_train, categorical_feature_names=categorical_feature_names, predict_proba=predict_proba, explainer_types=explainer_components, evaluator=evaluator, metrics=metrics, mcdm_method=mcdm_alg, aggregation_algorithm=aggregation_alg, **kwargs)
+                    
+                    explainer = AggregatedExplainer(clf=clf, X_train=X_train, categorical_feature_names=categorical_feature_names, 
+                                                    predict_proba=predict_proba, explainer_types=explainer_components, 
+                                                    evaluator=evaluator, metrics=metrics, mcdm_method=mcdm_alg, 
+                                                    aggregation_algorithm=aggregation_alg, **kwargs)
                     print(f"Explainer components: {explainer.explainer_types}, Metrics: {explainer.metrics}, MCDM algorithm: {explainer.mcdm_method}, Aggregation algorithm: {explainer.aggregation_algorithm}")
                     i += 1
 
