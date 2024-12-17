@@ -132,7 +132,16 @@ class ExplanationModelEvaluator:
         - noise_gen_args (dict): A dictionary containing the arguments to be passed to the AutoencoderNoisyDataGenerator class.
     """
 
-    def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, ohe_categorical_feature_names: list[str], predict_proba: callable = None, noise_gen_args: dict = {}, debug=False, **kwargs):
+    IS_METRIC_HIGHER_BETTER = {
+        "complexity": False,
+        "sensitivity_spearman": True,
+        "faithfulness_corr": True,
+        "nrc": False,
+        "nrc_old": False
+    }
+
+    def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, ohe_categorical_feature_names: list[str], predict_proba: callable = None,
+                 noise_gen_args: dict = {}, debug=False, jobs = None, **kwargs):
         self.clf = clf
         if hasattr(clf, 'predict_proba') and predict_proba is None:
             self.predict_proba = clf.predict_proba
@@ -150,6 +159,7 @@ class ExplanationModelEvaluator:
         ]
 
         self.noisy_data_generator = AutoencoderNoisyDataGenerator(X_train, ohe_categorical_feature_names, **noise_gen_args)
+        self.jobs = jobs
 
         self.debug = debug
         self.was_initialized = False
@@ -314,7 +324,7 @@ class ExplanationModelEvaluator:
         #     ]
         #     results = [future.result() for future in concurrent.futures.as_completed(futures)]
 
-        with Pool() as executor:
+        with Pool(processes = self.jobs) as executor:
             results = executor.map(
                 self._evaluate_sensitivity_iteration,
                 [original_explainer] * iterations,
@@ -354,7 +364,8 @@ class ExplanationModelEvaluator:
             pearson_correlation = pearsonr(original_explanation['score'], noisy_explanation['score']).correlation
             return abs(pearson_correlation)
 
-    def complexity(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, **kwargs) -> float:
+    def complexity(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series,
+                   explanation = None, **kwargs) -> float:
         """
         This metric is calculated as the entropy of the explanation's feature importance distribution.
         Referenced from: https://arxiv.org/abs/2005.00631
@@ -363,7 +374,10 @@ class ExplanationModelEvaluator:
         if not kwargs.get("bypass_check", False) and not isinstance(explainer, ExplainerWrapper):
             explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
 
-        explanation = explainer.explain_instance(instance_data_row)
+        if explanation is None:
+            explanation = explainer.explain_instance(instance_data_row)
+        else:
+            explanation = explanation
 
         def frac_contribution(explanation: pd.DataFrame, i: int) -> float:
             abs_score_sum = explanation['score'].abs().sum()
@@ -375,3 +389,102 @@ class ExplanationModelEvaluator:
             sum += fc * np.log(fc) if fc > 0 else 0
             
         return -sum
+    
+    def nrc_old(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, alpha: float = 0.5,
+            explanation: pd.DataFrame = None) -> float:
+        if not isinstance(explainer, ExplainerWrapper):
+            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+        
+        if explanation is None:
+            explanation = explainer.explain_instance(instance_data_row)
+
+        attributions = explanation['score'].values
+        attributions = np.abs(attributions) / np.sum(np.abs(attributions))
+
+        ranks = get_ranking_df(explanation)['Rank'].values
+        reciprocal_ranks = 1 / ranks
+        sum_reciprocal_ranks = sum(reciprocal_ranks)
+        sum_attributions = sum(attributions)
+        k = np.count_nonzero(attributions)
+
+        if k == 0:
+            return 0
+
+        log_weight = math.log(k + 1)
+        rank_dispersion = np.std(ranks)
+        revised_nrc_value = (sum_reciprocal_ranks / sum_attributions) * log_weight * (1 + alpha * rank_dispersion)
+        
+        return revised_nrc_value
+
+    def nrc(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, alpha: float = 0.5,
+                explanation: pd.DataFrame = None) -> float:
+        """
+        New proposed metric: NRC (Normalized Ratio of Complexity) with dispersion penalty
+        """
+
+        if not isinstance(explainer, ExplainerWrapper):
+            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+        
+        if explanation is None:
+            explanation = explainer.explain_instance(instance_data_row)
+
+        ranks = get_ranking_df(explanation)['Rank'].tolist()
+        ranks = np.array(ranks, dtype=int)
+        reciprocal_ranks = 1 / ranks
+        sum_reciprocal_ranks = np.sum(reciprocal_ranks)
+        n = len(ranks)
+
+        if n == 0:
+            return 0
+
+        log_weight = math.log(n + 1)
+        rank_dispersion = np.std(ranks)
+        revised_nrc_value = sum_reciprocal_ranks * log_weight * (1 + alpha * rank_dispersion)
+
+        return revised_nrc_value
+
+
+def get_ranking_df(ranking_df: pd.DataFrame, fraction: float = None, method: Literal["std", "spread"] = "std", epsilon: float = None) -> pd.DataFrame:
+    """
+    Assigns a rank to each feature based on the score in the ranking dataframe. Features with similar scores are assigned the same rank.
+    
+    Parameters:
+    ranking_df (pd.DataFrame): DataFrame containing the feature importance scores (two columns: 'feature' and 'score').
+    fraction (float): The fraction of the score range to use as epsilon. If epsilon is not provided, it is calculated based on this fraction.
+    method (str): The method to use to calculate epsilon. Can be 'std' (standard deviation) or 'spread' (score range).
+    epsilon (float): The epsilon value to use. If provided, the fraction parameter is ignored.
+    """
+
+    # Calculating epsilon
+    if epsilon is None:
+        if method == "std":
+            if fraction is None:
+                fraction = 0.05
+
+            epsilon = ranking_df["score"].std() * fraction
+        elif method == "spread":
+            if fraction is None:
+                fraction = 0.025
+            epsilon = (ranking_df["score"].max() - ranking_df["score"].min()) * fraction
+
+    # If two features have a score difference smaller than epsilon, they are considered to have the same rank
+    rank = pd.DataFrame(columns=['Feature', 'Rank'])
+    rank['Feature'] = ranking_df["feature"]
+    
+    # Sort the ranking dataframe by score in descending order
+    ranking_df = ranking_df.sort_values(by='score', ascending=False).reset_index(drop=True)
+    
+    current_rank = 1
+    rank['Rank'] = 0
+    rank.at[0, 'Rank'] = current_rank
+    max_score_in_rank = ranking_df.at[0, 'score']
+    
+    for i in range(1, len(ranking_df)):
+        if abs(ranking_df.at[i, 'score'] - max_score_in_rank) < epsilon:
+            rank.at[i, 'Rank'] = current_rank
+        else:
+            current_rank += 1
+            rank.at[i, 'Rank'] = current_rank
+            max_score_in_rank = ranking_df.at[i, 'score']
+    
+    return rank
