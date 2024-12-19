@@ -67,6 +67,8 @@ def evaluate_aggregate_explainer(
     if indexes is None:
         indexes = np.random.choice(X_test.index, n_instances, replace=False)
     
+    print(f"Selected indexes: {indexes}")
+    
     evaluator = ExplanationModelEvaluator(clf, X_train, categorical_feature_names, jobs=mp_jobs)
     evaluator.init()
 
@@ -87,6 +89,11 @@ def evaluate_aggregate_explainer(
         "nrc": evaluator.nrc
     }
 
+    metadata = {
+        "indexes": indexes,
+        "configs": []
+    }
+
     results = []
     i = 0
     for explainer_components in explainer_components_sets:
@@ -94,6 +101,13 @@ def evaluate_aggregate_explainer(
             for mcdm_alg in mcdm_algs:
                 for aggregation_alg in aggregation_algs:
                     print(f"Running evaluation for settings {i + 1}/{len(explainer_components_sets) * len(metrics_sets) * len(mcdm_algs) * len(aggregation_algs)}")
+                    
+                    metadata["configs"].append({
+                        "explainer_components": explainer_components,
+                        "metrics": metrics,
+                        "mcdm_alg": mcdm_alg,
+                        "aggregation_alg": aggregation_alg
+                    })
                     
                     explainer = AggregatedExplainer(clf=clf, X_train=X_train, categorical_feature_names=categorical_feature_names, 
                                                     predict_proba=predict_proba, explainer_types=explainer_components, 
@@ -107,14 +121,16 @@ def evaluate_aggregate_explainer(
                     for index in indexes:
                         print("\t Running instance", index)
                         
-                        explainer.explain_instance(X_train.iloc[index])
+                        explainer.explain_instance(X_test.loc[index])
                         instance_results = explainer.get_last_explanation_info().drop(columns=['weight'])
 
                         for metric in metrics:
-                            instance_results.at["AggregateExplainer", metric] = metrics_calls_setup[metric](explainer, X_train.iloc[index])
+                            instance_results.at["AggregateExplainer", metric] = metrics_calls_setup[metric](explainer, X_test.loc[index])
                         
                         settings_results.append(instance_results)
                     
                     results.append(settings_results)
     
-    return results
+    return results, metadata
+
+

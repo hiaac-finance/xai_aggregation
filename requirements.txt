@@ -8,5 +8,6 @@ scipy
 tensorflow
 tf-keras
 pathos
+pymcdm
 ranx
 xlrd
