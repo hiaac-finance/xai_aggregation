@@ -14,7 +14,7 @@ def evaluate_aggregate_explainer(
         metrics_sets: list[list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc']]] = [['nrc', 'sensitivity_spearman', 'faithfulness_corr']],
         extra_explainer_params: dict = {},
         n_instances: int = 10, indexes: list[int] = None,
-        random_state: int = 42, mp_jobs = 10, **kwargs) -> list[list[pd.DataFrame]]:
+        mp_jobs = 10, **kwargs) -> list[list[pd.DataFrame]]:
     
     """
     Evaluate the aggregate explainer with various settings.
@@ -47,8 +47,6 @@ def evaluate_aggregate_explainer(
         Number of instances to be evaluated. Default is 10.
     indexes : list[int], optional
         List of indexes of instances to be evaluated. If None, random instances are selected.
-    random_state : int, optional
-        Random state for reproducibility. Default is 42.
     mp_jobs : int, optional
         Number of parallel jobs to be used. Default is 10.
     **kwargs : dict
@@ -69,7 +67,8 @@ def evaluate_aggregate_explainer(
     
     print(f"Selected indexes: {indexes}")
     
-    evaluator = ExplanationModelEvaluator(clf, X_train, categorical_feature_names, jobs=mp_jobs)
+    evaluator = ExplanationModelEvaluator(clf, X_train, categorical_feature_names, jobs=mp_jobs,
+                                          noise_gen_args=extra_explainer_params.get("noise_gen_args", {}))
     evaluator.init()
 
     s_lbd: Callable[[AggregatedExplainer, pd.Series | np.ndarray], pd.DataFrame] = lambda explainer, instance_data_row: evaluator._sensitivity_sequential(
@@ -112,7 +111,7 @@ def evaluate_aggregate_explainer(
                     explainer = AggregatedExplainer(clf=clf, X_train=X_train, categorical_feature_names=categorical_feature_names, 
                                                     predict_proba=predict_proba, explainer_types=explainer_components, 
                                                     evaluator=evaluator, metrics=metrics, mcdm_method=mcdm_alg, 
-                                                    aggregation_algorithm=aggregation_alg, **kwargs)
+                                                    aggregation_algorithm=aggregation_alg, **extra_explainer_params)
                     print(f"Explainer components: {explainer.explainer_types}, Metrics: {explainer.metrics}, MCDM algorithm: {explainer.mcdm_method}, Aggregation algorithm: {explainer.aggregation_algorithm}")
                     i += 1
 
