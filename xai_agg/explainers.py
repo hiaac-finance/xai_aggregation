@@ -5,6 +5,13 @@ from alibi.explainers import AnchorTabular # why not used the original anchor pa
 import numpy as np
 import pandas as pd
 
+import pandera as pa
+from pandera.typing import DataFrame
+
+class ExplanationModel(pa.DataFrameModel):
+    feature: str
+    score: float = pa.Field(ge=0)
+
 """
 This script defines the ExplainerWrapper abstract base class and its subclasses, which are used to wrap the explainer classes,
 such as the ones from the LIME, SHAP, and Anchor libraries.
@@ -30,7 +37,7 @@ class ExplainerWrapper:
         self.categorical_feature_names = categorical_feature_names
 
     
-    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         """
         Explains the prediction of a single instance. Must return a DataFrame with two columns: 'feature' and 'score',
         where 'feature' is the name of the feature and 'score' is the absolute feature importance score.
@@ -44,12 +51,12 @@ class LimeWrapper(ExplainerWrapper):
         
         self.explainer = LimeTabularExplainer(self.X_train.values, feature_names=self.X_train.columns, discretize_continuous=False)
     
-    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         lime_exp = self.explainer.explain_instance(instance_data_row, self.predict_proba, num_features=len(self.X_train.columns))
         
         ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])    
         ranking['score'] = ranking['score'].apply(lambda x: abs(x))
-        return ranking
+        return DataFrame[ExplanationModel](ranking)
 
 class ShapTabularTreeWrapper(ExplainerWrapper):
     
@@ -58,13 +65,13 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
             
             self.explainer = shap.TreeExplainer(clf, self.X_train, **additional_explainer_args)
         
-        def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+        def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
             shap_values = self.explainer.shap_values(instance_data_row)
     
             ranking = pd.DataFrame(list(zip(self.X_train.columns, shap_values[:, 0])), columns=['feature', 'score'])
             ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
             ranking['score'] = ranking['score'].apply(lambda x: abs(x))
-            return ranking
+            return DataFrame[ExplanationModel](ranking)
 
 class AnchorWrapper(ExplainerWrapper):
     """
@@ -79,7 +86,7 @@ class AnchorWrapper(ExplainerWrapper):
         self.explainer = AnchorTabular(predictor=self.predict_proba, feature_names=self.X_train.columns) # TODO: fix parameters
         self.explainer.fit(self.X_train.values)
     
-    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         if isinstance(instance_data_row, pd.Series):
             instance_data_row = instance_data_row.to_numpy()
 
@@ -97,4 +104,5 @@ class AnchorWrapper(ExplainerWrapper):
             rule_coverage = self.X_train.query(rule).shape[0] / self.X_train.shape[0]
             feature_importances[referenced_feature] = 1 - rule_coverage
         
-        return pd.DataFrame(list(feature_importances.items()), columns=['feature', 'score']).sort_values(by='score', ascending=False).reset_index(drop=True)
+        ranking = pd.DataFrame(list(feature_importances.items()), columns=['feature', 'score']).sort_values(by='score', ascending=False).reset_index(drop=True)
+        return DataFrame[ExplanationModel](ranking)

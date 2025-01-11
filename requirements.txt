@@ -5,9 +5,10 @@ lime
 shap
 alibi
 scipy
-tensorflow
+tensorflow-cpu
 tf-keras
 pathos
 pymcdm
 ranx
 xlrd
+pandera

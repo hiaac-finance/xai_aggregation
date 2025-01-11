@@ -137,7 +137,8 @@ class ExplanationModelEvaluator:
         "sensitivity_spearman": True,
         "faithfulness_corr": True,
         "nrc": False,
-        "nrc_old": False
+        "nrc_old": False,
+        "rb_faithfullness_corr": True
     }
 
     def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, ohe_categorical_feature_names: list[str], predict_proba: callable = None,
@@ -170,15 +171,17 @@ class ExplanationModelEvaluator:
         self.noisy_data_generator.fit()
         self.was_initialized = True
             
-    def faithfullness_correlation(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, len_subset: int = None,
-                                  iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros") -> float:
+    def faithfullness_correlation(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None, len_subset: int = None,
+                                  iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros", ranked = False,
+                                  rank_alg: Literal["sum", "percentile", "avg"] = "sum", explanation: pd.DataFrame = None) -> float:
         """
         This metric measures the correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
         Referenced from: https://arxiv.org/abs/2005.00631
 
         Parameters:
-            explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated.
-            instance_data_row (pd.Series): The instance to be explained.
+            explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated. Must be passed if explanation is None.
+            instance_data_row (pd.Series): The instance to be explained. Must be passed if explanation is None.
+            explanation: The explanation of the instance. If None, the explainer will be used to generate the explanation, and both the explainer and the instance_data_row parameters must be passed.
             len_subset (int): The number of features to perturb in each iteration. If None, the default value is len(instance_data_row)//4 (25% of the features).
             iterations (int): The number of iterations to run the metric calculation. The higher the number of iterations, the more accurate the result.
             baseline_strategy (str): The strategy to be used to generate the baseline values for the perturbed features. Options are "zeros" (all zeros) or "mean" (mean of the training data).
@@ -187,61 +190,22 @@ class ExplanationModelEvaluator:
 
         if not isinstance(explainer, ExplainerWrapper):
             explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
-        
-        dimension = len(instance_data_row)  
 
         importance_sums = []
         delta_fs = []
 
         f_x = self.predict_proba(instance_data_row.to_numpy().reshape(1, -1))[0][1]
-        g_x = explainer.explain_instance(instance_data_row)
+        explanation = explanation if explanation is not None else explainer.explain_instance(instance_data_row)
 
         for _ in range(iterations):
-            evaluation = self._evaluate_faithfullness_iteration(instance_data_row, g_x, f_x, len_subset, baseline_strategy)
+            evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, ranked, rank_alg)
             importance_sums.append(evaluation[0])
             delta_fs.append(evaluation[1])
         
         return abs(pearsonr(importance_sums, delta_fs).statistic)
 
-    def _faithfullness_correlation_concurrent(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, len_subset: int = None,
-                                  iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros") -> float:
-        """
-        This metric measures the correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
-        Referenced from: https://arxiv.org/abs/2005.00631
-
-        Parameters:
-            explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated.
-            instance_data_row (pd.Series): The instance to be explained.
-            len_subset (int): The number of features to perturb in each iteration. If None, the default value is len(instance_data_row)//4 (25% of the features).
-            iterations (int): The number of iterations to run the metric calculation. The higher the number of iterations, the more accurate the result.
-            baseline_strategy (str): The strategy to be used to generate the baseline values for the perturbed features. Options are "zeros" (all zeros) or "mean" (mean of the training data).
-                                     "mean" usually provides higher correlation values, but "zeros" is more conservative.
-        """
-
-        if not isinstance(explainer, ExplainerWrapper):
-            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
-
-        f_x = self.predict_proba(instance_data_row.to_numpy().reshape(1, -1))[0][1]
-        g_x = explainer.explain_instance(instance_data_row)
-
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            futures = [
-                executor.submit(
-                    self._evaluate_faithfullness_iteration,
-                    instance_data_row,
-                    g_x,
-                    f_x,
-                    len_subset,
-                    baseline_strategy
-                )
-                for _ in range(iterations)
-            ]
-            results = [future.result() for future in concurrent.futures.as_completed(futures)]
-
-        importance_sums, delta_fs = zip(*results)
-        return abs(pearsonr(importance_sums, delta_fs).statistic)
-
-    def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, len_subset, baseline_strategy):
+    def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, len_subset, baseline_strategy, rank_based: bool = False,
+                                          rank_alg: Literal["sum", "percentile", "avg", "inverse"] = "sum") -> tuple[float, float]:
         subset = np.random.choice(instance_data_row.index.values, len_subset if len_subset else len(instance_data_row) // 4, replace=False)
         perturbed_instance = instance_data_row.copy()
 
@@ -254,35 +218,27 @@ class ExplanationModelEvaluator:
 
         perturbed_instance[subset] = baseline[instance_data_row.index.get_indexer(subset)]
 
-        importance_sum = sum(g_x[g_x['feature'] == feature]['score'].values[0] for feature in subset)
+        subset_g_x = g_x[g_x['feature'].isin(subset)]
+        subset_feature_importances = subset_g_x['score'].values
+
+        if not rank_based:
+            combined_importance = sum(subset_feature_importances)
+        else:
+            sfi_ranking = get_ranked_explanation(subset_g_x)
+            if rank_alg == "sum":
+                combined_importance = -sfi_ranking['rank'].sum()
+            elif rank_alg == "percentile":
+                percentiles = 1 - (sfi_ranking['rank'] / sfi_ranking['rank'].values[-1])
+                combined_importance = percentiles.sum()
+            elif rank_alg == "avg":
+                combined_importance = -sfi_ranking['rank'].mean()
+            elif rank_alg == "inverse":
+                combined_importance = (1 / sfi_ranking['rank']).sum()
+
         f_x_perturbed = self.predict_proba(perturbed_instance.to_numpy().reshape(1, -1))[0][1]
         delta_f = np.abs(f_x - f_x_perturbed)
 
-        return importance_sum, delta_f
-    
-    def _sensitivity_sequential(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson'] = 'spearman',
-                    custom_method: Callable[[pd.DataFrame, pd.DataFrame], float]=None, extra_explainer_params: dict = {}) -> float:
-        """
-        Sequential version of sensitivity()
-        """
-
-        if not self.was_initialized:
-            raise ValueError('The XaiEvaluator has not been initialized yet. Call the init() method before evaluating sensitivity.')
-        
-        if isinstance(ExplainerType, ExplainerWrapper):
-            ExplainerType = ExplainerType.__class__
-        
-        original_explainer = ExplainerType(clf=self.clf, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names, predict_proba=self.predict_proba, **extra_explainer_params)
-
-        results: list[float] = []
-        for _ in range(iterations):
-            results.append(
-                self._evaluate_sensitivity_iteration(
-                    original_explainer, instance_data_row, ExplainerType, method, custom_method, extra_explainer_params
-                )
-            )
-        
-        return np.mean(results)
+        return combined_importance, delta_f
 
     def sensitivity(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson'] = 'spearman',
                                custom_method: Callable[[pd.DataFrame, pd.DataFrame], float] = None, extra_explainer_params: dict = {}) -> float:
@@ -363,6 +319,30 @@ class ExplanationModelEvaluator:
         elif method == 'pearson':
             pearson_correlation = pearsonr(original_explanation['score'], noisy_explanation['score']).correlation
             return abs(pearson_correlation)
+    
+    def _sensitivity_sequential(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson'] = 'spearman',
+                    custom_method: Callable[[pd.DataFrame, pd.DataFrame], float]=None, extra_explainer_params: dict = {}) -> float:
+        """
+        Sequential version of sensitivity()
+        """
+
+        if not self.was_initialized:
+            raise ValueError('The XaiEvaluator has not been initialized yet. Call the init() method before evaluating sensitivity.')
+        
+        if isinstance(ExplainerType, ExplainerWrapper):
+            ExplainerType = ExplainerType.__class__
+        
+        original_explainer = ExplainerType(clf=self.clf, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names, predict_proba=self.predict_proba, **extra_explainer_params)
+
+        results: list[float] = []
+        for _ in range(iterations):
+            results.append(
+                self._evaluate_sensitivity_iteration(
+                    original_explainer, instance_data_row, ExplainerType, method, custom_method, extra_explainer_params
+                )
+            )
+        
+        return np.mean(results)
 
     def complexity(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series,
                    explanation = None, **kwargs) -> float:
@@ -401,7 +381,7 @@ class ExplanationModelEvaluator:
         attributions = explanation['score'].values
         attributions = np.abs(attributions) / np.sum(np.abs(attributions))
 
-        ranks = get_ranking_df(explanation)['Rank'].values
+        ranks = get_ranked_explanation(explanation)['rank'].values
         reciprocal_ranks = 1 / ranks
         sum_reciprocal_ranks = sum(reciprocal_ranks)
         sum_attributions = sum(attributions)
@@ -428,7 +408,7 @@ class ExplanationModelEvaluator:
         if explanation is None:
             explanation = explainer.explain_instance(instance_data_row)
 
-        ranks = get_ranking_df(explanation)['Rank'].tolist()
+        ranks = get_ranked_explanation(explanation)['rank'].tolist()
         ranks = np.array(ranks, dtype=int)
         reciprocal_ranks = 1 / ranks
         sum_reciprocal_ranks = np.sum(reciprocal_ranks)
@@ -441,18 +421,28 @@ class ExplanationModelEvaluator:
         rank_dispersion = np.std(ranks)
         revised_nrc_value = sum_reciprocal_ranks * log_weight * (1 + alpha * rank_dispersion)
 
-        return revised_nrc_value
+        return revised_nrc_value  
 
 
-def get_ranking_df(ranking_df: pd.DataFrame, fraction: float = None, method: Literal["std", "spread"] = "std", epsilon: float = None) -> pd.DataFrame:
+import pandera as pa
+from pandera.typing import DataFrame
+
+class RankedExplanationModel(pa.DataFrameModel):
+    feature: str
+    rank: int = pa.Field(ge=0)
+
+def get_ranked_explanation(scored_explanation: DataFrame[ExplanationModel], fraction: float = None, method: Literal["std", "spread"] = "std", epsilon: float = None) -> DataFrame[RankedExplanationModel]:
     """
     Assigns a rank to each feature based on the score in the ranking dataframe. Features with similar scores are assigned the same rank.
     
     Parameters:
-    ranking_df (pd.DataFrame): DataFrame containing the feature importance scores (two columns: 'feature' and 'score').
+    scored_explanation (DataFrame[ExplanationModel]): DataFrame containing the feature importance scores (two columns: 'feature' and 'score').
     fraction (float): The fraction of the score range to use as epsilon. If epsilon is not provided, it is calculated based on this fraction.
     method (str): The method to use to calculate epsilon. Can be 'std' (standard deviation) or 'spread' (score range).
     epsilon (float): The epsilon value to use. If provided, the fraction parameter is ignored.
+
+    Returns:
+    A pd.DataFrame containing the features ('feature' column) and their respective ranks ('rank' column).
     """
 
     # Calculating epsilon
@@ -461,30 +451,30 @@ def get_ranking_df(ranking_df: pd.DataFrame, fraction: float = None, method: Lit
             if fraction is None:
                 fraction = 0.05
 
-            epsilon = ranking_df["score"].std() * fraction
+            epsilon = scored_explanation["score"].std() * fraction
         elif method == "spread":
             if fraction is None:
                 fraction = 0.025
-            epsilon = (ranking_df["score"].max() - ranking_df["score"].min()) * fraction
+            epsilon = (scored_explanation["score"].max() - scored_explanation["score"].min()) * fraction
 
-    # If two features have a score difference smaller than epsilon, they are considered to have the same rank
-    rank = pd.DataFrame(columns=['Feature', 'Rank'])
-    rank['Feature'] = ranking_df["feature"]
-    
     # Sort the ranking dataframe by score in descending order
-    ranking_df = ranking_df.sort_values(by='score', ascending=False).reset_index(drop=True)
+    scored_explanation = scored_explanation.sort_values(by='score', ascending=False).reset_index(drop=True)
+    
+    # If two features have a score difference smaller than epsilon, they are considered to have the same rank
+    ranked_explanation = pd.DataFrame(columns=['feature', 'rank'])
+    ranked_explanation['feature'] = scored_explanation["feature"]
     
     current_rank = 1
-    rank['Rank'] = 0
-    rank.at[0, 'Rank'] = current_rank
-    max_score_in_rank = ranking_df.at[0, 'score']
+    ranked_explanation['rank'] = 0
+    ranked_explanation.at[0, 'rank'] = current_rank
+    max_score_in_rank = scored_explanation.at[0, 'score']
     
-    for i in range(1, len(ranking_df)):
-        if abs(ranking_df.at[i, 'score'] - max_score_in_rank) < epsilon:
-            rank.at[i, 'Rank'] = current_rank
+    for i in range(1, len(scored_explanation)):
+        if abs(scored_explanation.at[i, 'score'] - max_score_in_rank) < epsilon:
+            ranked_explanation.at[i, 'rank'] = current_rank
         else:
             current_rank += 1
-            rank.at[i, 'Rank'] = current_rank
-            max_score_in_rank = ranking_df.at[i, 'score']
+            ranked_explanation.at[i, 'rank'] = current_rank
+            max_score_in_rank = scored_explanation.at[i, 'score']
     
-    return rank
+    return DataFrame[RankedExplanationModel](ranked_explanation)
