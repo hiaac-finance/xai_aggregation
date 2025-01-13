@@ -58,7 +58,6 @@ def evaluate_aggregate_explainer(
         A list of lists of dataframes containing the evaluation results for each instance and setting configuration.
     """
 
-
     if predict_proba is None:
         predict_proba = clf.predict_proba
 
@@ -81,8 +80,9 @@ def evaluate_aggregate_explainer(
             "metrics": explainer.metrics
         })
     
-    metrics_calls_setup = {
+    metrics_functions_setup_rae = {                                     
         "faithfulness_corr": evaluator.faithfullness_correlation,
+        "rb_faithfulness_corr": lambda explainer, instance_data_row: evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10, rank_based=True, rb_alg="percentile"),
         "sensitivity_spearman": s_lbd,
         "complexity": evaluator.complexity,
         "nrc": evaluator.nrc
@@ -124,7 +124,7 @@ def evaluate_aggregate_explainer(
                         instance_results = explainer.get_last_explanation_info().drop(columns=['weight'])
 
                         for metric in metrics:
-                            instance_results.at["AggregateExplainer", metric] = metrics_calls_setup[metric](explainer, X_test.loc[index])
+                            instance_results.at["AggregateExplainer", metric] = metrics_functions_setup_rae[metric](explainer, X_test.loc[index])
                         
                         settings_results.append(instance_results)
                     

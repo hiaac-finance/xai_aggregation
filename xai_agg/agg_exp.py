@@ -39,7 +39,7 @@ class AggregatedExplainer(ExplainerWrapper):
 
     def __init__(self, explainer_types: list[Type[ExplainerWrapper]], clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None,
                  explainer_params_list: dict[Type[ExplainerWrapper], dict] = None,
-                 metrics: list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc']] = ['complexity', 'sensitivity_spearman', 'faithfulness_corr'],
+                 metrics: list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc', 'rb_faithfulness_corr']] = ['complexity', 'sensitivity_spearman', 'faithfulness_corr'],
                  mcdm_method: MCDA_method = pymcdm.methods.TOPSIS(), aggregation_algorithm: Literal["wsum", "w_bordafuse", "w_condorcet"] = "wsum", **kwargs):
         super().__init__(clf, X_train, categorical_feature_names, predict_proba)
 
@@ -60,6 +60,15 @@ class AggregatedExplainer(ExplainerWrapper):
         self.aggregation_algorithm = aggregation_algorithm
 
         self.last_explanation_metrics: pd.DataFrame = None
+        
+        self._metric_functions = {
+            "faithfulness_corr": lambda explainer, instance_data_row: self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10),
+            "rb_faithfulness_corr": lambda explainer, instance_data_row: self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10, rank_based=True, rb_alg="percentile"),
+            "sensitivity_spearman": self.xai_evaluator.sensitivity,
+            "complexity": self.xai_evaluator.complexity,
+            "nrc": self.xai_evaluator.nrc,
+            "nrc_old": self.xai_evaluator.nrc_old
+        }
     
     @staticmethod
     def _ranking_to_run(feature_importance_ranking: pd.DataFrame) -> ranx.Run:
@@ -96,16 +105,18 @@ class AggregatedExplainer(ExplainerWrapper):
         for explainer in self.explainers:
             expaliner_metrics_row = []
             for metric in self.metrics:
-                if metric == "faithfulness_corr":
-                    expaliner_metrics_row.append(self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10))
-                elif metric == "sensitivity_spearman":
-                    expaliner_metrics_row.append(self.xai_evaluator.sensitivity(explainer, instance_data_row, iterations=10))
-                elif metric == "complexity":
-                    expaliner_metrics_row.append(self.xai_evaluator.complexity(explainer, instance_data_row))
-                elif metric == "nrc":
-                    expaliner_metrics_row.append(self.xai_evaluator.nrc(explainer, instance_data_row))
-                elif metric == "nrc_old":
-                    expaliner_metrics_row.append(self.xai_evaluator.nrc_old(explainer, instance_data_row))
+                # if metric == "faithfulness_corr":
+                #     expaliner_metrics_row.append(self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10))
+                # elif metric == "sensitivity_spearman":
+                #     expaliner_metrics_row.append(self.xai_evaluator.sensitivity(explainer, instance_data_row, iterations=10))
+                # elif metric == "complexity":
+                #     expaliner_metrics_row.append(self.xai_evaluator.complexity(explainer, instance_data_row))
+                # elif metric == "nrc":
+                #     expaliner_metrics_row.append(self.xai_evaluator.nrc(explainer, instance_data_row))
+                # elif metric == "nrc_old":
+                #     expaliner_metrics_row.append(self.xai_evaluator.nrc_old(explainer, instance_data_row))
+                
+                expaliner_metrics_row.append(self._metric_functions[metric](explainer, instance_data_row))
                 
             instance_explanation_metrics.append(expaliner_metrics_row)
 

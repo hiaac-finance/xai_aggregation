@@ -138,7 +138,7 @@ class ExplanationModelEvaluator:
         "faithfulness_corr": True,
         "nrc": False,
         "nrc_old": False,
-        "rb_faithfullness_corr": True
+        "rb_faithfulness_corr": True
     }
 
     def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, ohe_categorical_feature_names: list[str], predict_proba: callable = None,
@@ -171,9 +171,9 @@ class ExplanationModelEvaluator:
         self.noisy_data_generator.fit()
         self.was_initialized = True
             
-    def faithfullness_correlation(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None, len_subset: int = None,
-                                  iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros", ranked = False,
-                                  rank_alg: Literal["sum", "percentile", "avg"] = "sum", explanation: pd.DataFrame = None) -> float:
+    def faithfullness_correlation(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, len_subset: int = None,
+                                  iterations: int = 10, baseline_strategy: Literal["zeros", "mean"] = "zeros", rank_based = False,
+                                  rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "percentile", explanation: DataFrame[ExplanationModel] = None) -> float:
         """
         This metric measures the correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
         Referenced from: https://arxiv.org/abs/2005.00631
@@ -188,24 +188,26 @@ class ExplanationModelEvaluator:
                                      "mean" usually provides hihger correlation values, but "zeros" is more conservative.
         """
 
-        if not isinstance(explainer, ExplainerWrapper):
-            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+        if explanation is None:
+            if not isinstance(explainer, ExplainerWrapper):
+                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+            
+            explanation = explanation if explanation is not None else explainer.explain_instance(instance_data_row)
 
         importance_sums = []
         delta_fs = []
 
         f_x = self.predict_proba(instance_data_row.to_numpy().reshape(1, -1))[0][1]
-        explanation = explanation if explanation is not None else explainer.explain_instance(instance_data_row)
 
         for _ in range(iterations):
-            evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, ranked, rank_alg)
+            evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, rank_based, rb_alg)
             importance_sums.append(evaluation[0])
             delta_fs.append(evaluation[1])
         
         return abs(pearsonr(importance_sums, delta_fs).statistic)
 
     def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, len_subset, baseline_strategy, rank_based: bool = False,
-                                          rank_alg: Literal["sum", "percentile", "avg", "inverse"] = "sum") -> tuple[float, float]:
+                                          rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "sum") -> tuple[float, float]:
         subset = np.random.choice(instance_data_row.index.values, len_subset if len_subset else len(instance_data_row) // 4, replace=False)
         perturbed_instance = instance_data_row.copy()
 
@@ -225,14 +227,14 @@ class ExplanationModelEvaluator:
             combined_importance = sum(subset_feature_importances)
         else:
             sfi_ranking = get_ranked_explanation(subset_g_x)
-            if rank_alg == "sum":
+            if rb_alg == "sum":
                 combined_importance = -sfi_ranking['rank'].sum()
-            elif rank_alg == "percentile":
+            elif rb_alg == "percentile":
                 percentiles = 1 - (sfi_ranking['rank'] / sfi_ranking['rank'].values[-1])
                 combined_importance = percentiles.sum()
-            elif rank_alg == "avg":
+            elif rb_alg == "avg":
                 combined_importance = -sfi_ranking['rank'].mean()
-            elif rank_alg == "inverse":
+            elif rb_alg == "inverse":
                 combined_importance = (1 / sfi_ranking['rank']).sum()
 
         f_x_perturbed = self.predict_proba(perturbed_instance.to_numpy().reshape(1, -1))[0][1]
@@ -241,7 +243,7 @@ class ExplanationModelEvaluator:
         return combined_importance, delta_f
 
     def sensitivity(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson'] = 'spearman',
-                               custom_method: Callable[[pd.DataFrame, pd.DataFrame], float] = None, extra_explainer_params: dict = {}) -> float:
+                    custom_method: Callable[[pd.DataFrame, pd.DataFrame], float] = None, extra_explainer_params: dict = {}) -> float:
         """
         Concurrent variation of the sensitivity method. This metric measures the relationship (average difference or correlation) between the explanation of the instance and the explanation of a noisy version of the instance.
         The explainer is instantiated twice: once to explain the original instance and once to explain the noisy instance, since it may need to fit or train itself with the data.
@@ -263,22 +265,8 @@ class ExplanationModelEvaluator:
         if isinstance(ExplainerType, ExplainerWrapper):
             ExplainerType = ExplainerType.__class__
 
-        original_explainer = ExplainerType(clf=self.clf, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names, predict_proba=self.predict_proba, **extra_explainer_params)
-
-        # with concurrent.futures.ProcessPoolExecutor() as executor:
-        #     futures = [
-        #         executor.submit(
-        #             self._evaluate_sensitivity_iteration,
-        #             original_explainer,
-        #             instance_data_row,
-        #             ExplainerType,
-        #             method,
-        #             custom_method,
-        #             extra_explainer_params
-        #         )
-        #         for _ in range(iterations)
-        #     ]
-        #     results = [future.result() for future in concurrent.futures.as_completed(futures)]
+        original_explainer = ExplainerType(clf=self.clf, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names,
+                                           predict_proba=self.predict_proba, **extra_explainer_params)
 
         with Pool(processes = self.jobs) as executor:
             results = executor.map(
@@ -344,21 +332,26 @@ class ExplanationModelEvaluator:
         
         return np.mean(results)
 
-    def complexity(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series,
-                   explanation = None, **kwargs) -> float:
+    def complexity(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None,
+                   explanation: DataFrame[ExplanationModel] = None, **kwargs) -> float:
         """
         This metric is calculated as the entropy of the explanation's feature importance distribution.
         Referenced from: https://arxiv.org/abs/2005.00631
+        
+        Parameters:
+            - explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated. Must be passed if explanation is None.
+            - instance_data_row (pd.Series): The instance to be explained. Must be passed if explanation is None.
+            - explanation: The explanation of the instance. If None, the explainer will be used to generate the explanation, and both the explainer and the instance_data_row parameters must be passed.
         """
-
-        if not kwargs.get("bypass_check", False) and not isinstance(explainer, ExplainerWrapper):
-            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+        
+        assert explanation is not None or (explainer is not None and instance_data_row is not None), "Either an explanation or both an explainer and an instance_data_row must be provided."
 
         if explanation is None:
-            explanation = explainer.explain_instance(instance_data_row)
-        else:
-            explanation = explanation
-
+            if not isinstance(explainer, ExplainerWrapper):
+                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+            
+            explanation = explanation if explanation is not None else explainer.explain_instance(instance_data_row)
+        
         def frac_contribution(explanation: pd.DataFrame, i: int) -> float:
             abs_score_sum = explanation['score'].abs().sum()
             return explanation['score'].abs()[i] / abs_score_sum
@@ -370,12 +363,14 @@ class ExplanationModelEvaluator:
             
         return -sum
     
-    def nrc_old(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, alpha: float = 0.5,
-            explanation: pd.DataFrame = None) -> float:
-        if not isinstance(explainer, ExplainerWrapper):
-            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+    def nrc_old(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None, alpha: float = 0.5,
+                explanation: DataFrame[ExplanationModel] = None) -> float:
+        assert explanation is not None or (explainer is not None and instance_data_row is not None), "Either an explanation or both an explainer and an instance_data_row must be provided."
         
         if explanation is None:
+            if not isinstance(explainer, ExplainerWrapper):
+                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+                
             explanation = explainer.explain_instance(instance_data_row)
 
         attributions = explanation['score'].values
@@ -396,16 +391,24 @@ class ExplanationModelEvaluator:
         
         return revised_nrc_value
 
-    def nrc(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, alpha: float = 0.5,
-                explanation: pd.DataFrame = None) -> float:
+    def nrc(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None, alpha: float = 0.5,
+            explanation: DataFrame[ExplanationModel] = None) -> float:
         """
-        New proposed metric: NRC (Normalized Ratio of Complexity) with dispersion penalty
-        """
-
-        if not isinstance(explainer, ExplainerWrapper):
-            explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+        New proposed metric: NRC (Normalized Ratio of Complexity) with dispersion penalty.
         
+        Parameters:
+            - explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated. Must be passed if explanation is None.
+            - instance_data_row (pd.Series): The instance to be explained. Must be passed if explanation is None.
+            - alpha (float): The dispersion penalty factor. The higher the value, the more the metric will penalize explanations with high rank dispersion.
+            - explanation: The explanation of the instance. If None, the explainer will be used to generate the explanation, and both the explainer and the instance_data_row parameters must be passed.
+        """
+        
+        assert explanation is not None or (explainer is not None and instance_data_row is not None), "Either an explanation or both an explainer and an instance_data_row must be provided."
+
         if explanation is None:
+            if not isinstance(explainer, ExplainerWrapper):
+                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+            
             explanation = explainer.explain_instance(instance_data_row)
 
         ranks = get_ranked_explanation(explanation)['rank'].tolist()

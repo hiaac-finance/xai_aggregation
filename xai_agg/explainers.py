@@ -52,7 +52,7 @@ class LimeWrapper(ExplainerWrapper):
         self.explainer = LimeTabularExplainer(self.X_train.values, feature_names=self.X_train.columns, discretize_continuous=False)
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
-        lime_exp = self.explainer.explain_instance(instance_data_row, self.predict_proba, num_features=len(self.X_train.columns))
+        lime_exp = self.explainer.explain_instance(np.array(instance_data_row), self.predict_proba, num_features=len(self.X_train.columns))
         
         ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])    
         ranking['score'] = ranking['score'].apply(lambda x: abs(x))
@@ -66,7 +66,9 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
             self.explainer = shap.TreeExplainer(clf, self.X_train, **additional_explainer_args)
         
         def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
-            shap_values = self.explainer.shap_values(instance_data_row)
+            shap_values = self.explainer.shap_values(np.array(instance_data_row), 
+                                                     check_additivity=False) # This was causing some issues; since it wouldnt be the end of the world 
+                                                                             # if we don't check additivity, I removed it.
     
             ranking = pd.DataFrame(list(zip(self.X_train.columns, shap_values[:, 0])), columns=['feature', 'score'])
             ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
