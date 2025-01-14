@@ -96,7 +96,7 @@ class AggregatedExplainer(ExplainerWrapper):
 
         return weights
 
-    def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> pd.DataFrame:
+    def explain_instance(self, instance_data_row: pd.Series) -> pd.DataFrame:
         runs = []
         for explainer in self.explainers:
             runs.append(self._ranking_to_run(explainer.explain_instance(instance_data_row)))
@@ -105,17 +105,6 @@ class AggregatedExplainer(ExplainerWrapper):
         for explainer in self.explainers:
             expaliner_metrics_row = []
             for metric in self.metrics:
-                # if metric == "faithfulness_corr":
-                #     expaliner_metrics_row.append(self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10))
-                # elif metric == "sensitivity_spearman":
-                #     expaliner_metrics_row.append(self.xai_evaluator.sensitivity(explainer, instance_data_row, iterations=10))
-                # elif metric == "complexity":
-                #     expaliner_metrics_row.append(self.xai_evaluator.complexity(explainer, instance_data_row))
-                # elif metric == "nrc":
-                #     expaliner_metrics_row.append(self.xai_evaluator.nrc(explainer, instance_data_row))
-                # elif metric == "nrc_old":
-                #     expaliner_metrics_row.append(self.xai_evaluator.nrc_old(explainer, instance_data_row))
-                
                 expaliner_metrics_row.append(self._metric_functions[metric](explainer, instance_data_row))
                 
             instance_explanation_metrics.append(expaliner_metrics_row)

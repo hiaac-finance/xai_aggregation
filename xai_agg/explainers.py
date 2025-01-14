@@ -63,14 +63,16 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
         def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None, **additional_explainer_args):
             super().__init__(clf, X_train, categorical_feature_names, predict_proba)
             
-            self.explainer = shap.TreeExplainer(clf, self.X_train, **additional_explainer_args)
+            self.explainer = shap.TreeExplainer(clf, **additional_explainer_args)
         
-        def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
-            shap_values = self.explainer.shap_values(np.array(instance_data_row), 
-                                                     check_additivity=False) # This was causing some issues; since it wouldnt be the end of the world 
-                                                                             # if we don't check additivity, I removed it.
-    
-            ranking = pd.DataFrame(list(zip(self.X_train.columns, shap_values[:, 0])), columns=['feature', 'score'])
+        def explain_instance(self, instance_data_row: np.ndarray) -> DataFrame[ExplanationModel]:
+            if isinstance(instance_data_row, pd.Series):
+                instance_data_row = instance_data_row.to_numpy()
+            
+            shap_values = self.explainer.shap_values(instance_data_row)
+            predicted_class = np.argmax(self.predict_proba(instance_data_row.reshape(1, -1))) # Only grab shap values for the predicted class, mirroring lime behavior
+
+            ranking = pd.DataFrame(list(zip(self.X_train.columns, shap_values[:, predicted_class])), columns=['feature', 'score'])
             ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
             ranking['score'] = ranking['score'].apply(lambda x: abs(x))
             return DataFrame[ExplanationModel](ranking)
@@ -102,8 +104,11 @@ class AnchorWrapper(ExplainerWrapper):
                 if any(c.isalpha() for c in expression_element):
                     referenced_feature = expression_element
                     break
-
-            rule_coverage = self.X_train.query(rule).shape[0] / self.X_train.shape[0]
+            try:
+                rule_coverage = self.X_train.query(rule).shape[0] / self.X_train.shape[0]
+            except SyntaxError:
+                raise ValueError(f"[AnchorWrapper explainer]: Rule '{rule}' could not be parsed. Make sure your data columns are valid python variable names/identifiers" + 
+                                 " (i.e. they don't start with a number and don't contain spaces or special characters). Please refer to the usage examples.")
             feature_importances[referenced_feature] = 1 - rule_coverage
         
         ranking = pd.DataFrame(list(feature_importances.items()), columns=['feature', 'score']).sort_values(by='score', ascending=False).reset_index(drop=True)

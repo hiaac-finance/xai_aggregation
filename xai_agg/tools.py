@@ -197,7 +197,7 @@ class ExplanationModelEvaluator:
         importance_sums = []
         delta_fs = []
 
-        f_x = self.predict_proba(instance_data_row.to_numpy().reshape(1, -1))[0][1]
+        f_x = self.predict_proba(np.array(instance_data_row).reshape(1, -1))[0][1]
 
         for _ in range(iterations):
             evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, rank_based, rb_alg)
