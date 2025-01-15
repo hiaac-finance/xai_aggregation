@@ -47,6 +47,8 @@ class ExplainerWrapper:
                 self.mode = "regression"
             else:
                 raise ValueError("Could not determine the mode of the model. Please provide a value for the mode parameter.")
+        else:
+            self.mode = mode
 
         self.X_train = X_train
         self.categorical_feature_names = categorical_feature_names

@@ -199,8 +199,8 @@ class ExplanationModelEvaluator:
 
         importance_sums = []
         delta_fs = []
-
-        f_x = self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0][1]
+        
+        f_x = np.max(self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0])
 
         for _ in range(iterations):
             evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, rank_based, rb_alg)
@@ -240,7 +240,7 @@ class ExplanationModelEvaluator:
             elif rb_alg == "inverse":
                 combined_importance = (1 / sfi_ranking['rank']).sum()
 
-        f_x_perturbed = self.predict_fn(perturbed_instance.to_numpy().reshape(1, -1))[0][1]
+        f_x_perturbed = np.max(self.predict_fn(perturbed_instance.to_numpy().reshape(1, -1))[0])
         delta_f = np.abs(f_x - f_x_perturbed)
 
         return combined_importance, delta_f
