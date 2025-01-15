@@ -200,16 +200,19 @@ class ExplanationModelEvaluator:
         importance_sums = []
         delta_fs = []
         
-        f_x = np.max(self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0])
+        prediction = self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0]
+        predicted_index = np.argmax(prediction)
+        f_x = prediction[predicted_index] if isinstance(prediction, (list, np.ndarray)) else prediction
 
         for _ in range(iterations):
-            evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, rank_based, rb_alg)
+            evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, predicted_index, len_subset, baseline_strategy, rank_based, rb_alg)
             importance_sums.append(evaluation[0])
             delta_fs.append(evaluation[1])
         
-        return abs(pearsonr(importance_sums, delta_fs).statistic)
+        print(importance_sums, delta_fs)
+        return abs(spearmanr(importance_sums, delta_fs).correlation)
 
-    def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, len_subset, baseline_strategy, rank_based: bool = False,
+    def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, predicted_index, len_subset, baseline_strategy, rank_based: bool = False,
                                           rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "sum") -> tuple[float, float]:
         subset = np.random.choice(instance_data_row.index.values, len_subset if len_subset else len(instance_data_row) // 4, replace=False)
         perturbed_instance = instance_data_row.copy()
@@ -225,6 +228,7 @@ class ExplanationModelEvaluator:
 
         subset_g_x = g_x[g_x['feature'].isin(subset)]
         subset_feature_importances = subset_g_x['score'].values
+        print(subset_feature_importances)
 
         if not rank_based:
             combined_importance = sum(subset_feature_importances)
@@ -240,7 +244,8 @@ class ExplanationModelEvaluator:
             elif rb_alg == "inverse":
                 combined_importance = (1 / sfi_ranking['rank']).sum()
 
-        f_x_perturbed = np.max(self.predict_fn(perturbed_instance.to_numpy().reshape(1, -1))[0])
+        prediction = self.predict_fn(perturbed_instance.to_numpy().reshape(1, -1))[0]
+        f_x_perturbed = prediction[predicted_index] if isinstance(prediction, (list, np.ndarray)) else prediction
         delta_f = np.abs(f_x - f_x_perturbed)
 
         return combined_importance, delta_f

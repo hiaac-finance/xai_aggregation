@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import pandas as pd
 
-from xai_agg.tools import *
+from xai_agg import *
 
 @dataclass
 class ExperimentRun:
@@ -57,4 +57,22 @@ def count_worst_case_avoidances(config_results: list[pd.DataFrame], is_more_bett
                 counts[tolerance] += 1
 
     return counts
+
+
+def get_average_metric_rank(config_results: list[pd.DataFrame], is_more_better: list[bool]):
+    ranks = []
+
+    for instance_result in config_results:
+        instance_rank = []
+        for col_i, is_better in enumerate(is_more_better):
+            if is_better:
+                instance_rank.append(instance_result.iloc[:, col_i].rank(ascending=False))
+            else:
+                instance_rank.append(instance_result.iloc[:, col_i].rank(ascending=True))
+                
+        instance_rank = pd.concat(instance_rank, axis=1)
+        ranks.append(instance_rank)
     
+    avg_ranks = pd.concat(ranks).groupby(level=0).mean()
+    
+    return avg_ranks
