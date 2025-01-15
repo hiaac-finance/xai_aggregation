@@ -141,15 +141,18 @@ class ExplanationModelEvaluator:
         "rb_faithfulness_corr": True
     }
 
-    def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, ohe_categorical_feature_names: list[str], predict_proba: callable = None,
+    def __init__(self, model, X_train: pd.DataFrame | np.ndarray, ohe_categorical_feature_names: list[str] = [], predict_fn: callable = None,
                  noise_gen_args: dict = {}, debug=False, jobs = None, **kwargs):
-        self.clf = clf
-        if hasattr(clf, 'predict_proba') and predict_proba is None:
-            self.predict_proba = clf.predict_proba
-        elif predict_proba is not None:
-            self.predict_proba = predict_proba
+        self.model = model
+        if predict_fn is None:
+            if hasattr(self.model, 'predict_proba'):
+                self.predict_fn = self.model.predict_proba
+            elif hasattr(self.model, 'predict'):
+                self.predict_fn = self.model.predict
+            else:
+                raise ValueError('Could not find a predict or predict_proba method in the model. Please provide a value for the predict_fn parameter.')
         else:
-            raise ValueError('The classifier does not have a predict_proba method and no predict_proba_function was provided.')
+            self.predict_fn = predict_fn
 
         self.X_train = X_train
         self.ohe_categorical_feature_names = ohe_categorical_feature_names
@@ -190,14 +193,14 @@ class ExplanationModelEvaluator:
 
         if explanation is None:
             if not isinstance(explainer, ExplainerWrapper):
-                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+                explainer = explainer(self.model, self.X_train, self.ohe_categorical_feature_names, predict_fn=self.predict_fn)
             
             explanation = explanation if explanation is not None else explainer.explain_instance(instance_data_row)
 
         importance_sums = []
         delta_fs = []
 
-        f_x = self.predict_proba(np.array(instance_data_row).reshape(1, -1))[0][1]
+        f_x = self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0][1]
 
         for _ in range(iterations):
             evaluation = self._evaluate_faithfullness_iteration(instance_data_row, explanation, f_x, len_subset, baseline_strategy, rank_based, rb_alg)
@@ -237,7 +240,7 @@ class ExplanationModelEvaluator:
             elif rb_alg == "inverse":
                 combined_importance = (1 / sfi_ranking['rank']).sum()
 
-        f_x_perturbed = self.predict_proba(perturbed_instance.to_numpy().reshape(1, -1))[0][1]
+        f_x_perturbed = self.predict_fn(perturbed_instance.to_numpy().reshape(1, -1))[0][1]
         delta_f = np.abs(f_x - f_x_perturbed)
 
         return combined_importance, delta_f
@@ -265,8 +268,8 @@ class ExplanationModelEvaluator:
         if isinstance(ExplainerType, ExplainerWrapper):
             ExplainerType = ExplainerType.__class__
 
-        original_explainer = ExplainerType(clf=self.clf, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names,
-                                           predict_proba=self.predict_proba, **extra_explainer_params)
+        original_explainer = ExplainerType(model=self.model, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names,
+                                           predict_fn=self.predict_fn, **extra_explainer_params)
 
         with Pool(processes = self.jobs) as executor:
             results = executor.map(
@@ -281,7 +284,7 @@ class ExplanationModelEvaluator:
 
         return np.mean(results)
 
-    def _evaluate_sensitivity_iteration(self, original_explainer, instance_data_row, ExplainerType, method, custom_method, extra_explainer_params):
+    def _evaluate_sensitivity_iteration(self, original_explainer, instance_data_row, ExplainerType: Type[ExplainerWrapper], method, custom_method, extra_explainer_params):
         if self.debug:
             print(f"[sensitivity_concurrent()]: (iteration)")
 
@@ -290,7 +293,7 @@ class ExplanationModelEvaluator:
 
         # Obtain the noisy explanation:
         noisy_data = self.noisy_data_generator.generate_noisy_data()
-        noisy_explainer = ExplainerType(clf=self.clf, X_train=noisy_data, categorical_feature_names=self.ohe_categorical_feature_names, predict_proba=self.predict_proba, **extra_explainer_params)
+        noisy_explainer = ExplainerType(model=self.model, X_train=noisy_data, categorical_feature_names=self.ohe_categorical_feature_names, predict_fn=self.predict_fn, **extra_explainer_params)
         noisy_explanation = noisy_explainer.explain_instance(instance_data_row)
 
         # Align the two explanations
@@ -320,7 +323,7 @@ class ExplanationModelEvaluator:
         if isinstance(ExplainerType, ExplainerWrapper):
             ExplainerType = ExplainerType.__class__
         
-        original_explainer = ExplainerType(clf=self.clf, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names, predict_proba=self.predict_proba, **extra_explainer_params)
+        original_explainer = ExplainerType(model=self.model, X_train=self.X_train, categorical_feature_names=self.ohe_categorical_feature_names, predict_fn=self.predict_fn, **extra_explainer_params)
 
         results: list[float] = []
         for _ in range(iterations):
@@ -348,7 +351,7 @@ class ExplanationModelEvaluator:
 
         if explanation is None:
             if not isinstance(explainer, ExplainerWrapper):
-                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+                explainer = explainer(self.model, self.X_train, self.ohe_categorical_feature_names, predict_fn=self.predict_fn)
             
             explanation = explanation if explanation is not None else explainer.explain_instance(instance_data_row)
         
@@ -369,7 +372,7 @@ class ExplanationModelEvaluator:
         
         if explanation is None:
             if not isinstance(explainer, ExplainerWrapper):
-                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+                explainer = explainer(self.model, self.X_train, self.ohe_categorical_feature_names, predict_fn=self.predict_fn)
                 
             explanation = explainer.explain_instance(instance_data_row)
 
@@ -407,7 +410,7 @@ class ExplanationModelEvaluator:
 
         if explanation is None:
             if not isinstance(explainer, ExplainerWrapper):
-                explainer = explainer(self.clf, self.X_train, self.ohe_categorical_feature_names, predict_proba=self.predict_proba)
+                explainer = explainer(self.model, self.X_train, self.ohe_categorical_feature_names, predict_fn=self.predict_fn)
             
             explanation = explainer.explain_instance(instance_data_row)
 

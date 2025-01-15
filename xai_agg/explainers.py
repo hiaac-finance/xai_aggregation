@@ -8,6 +8,9 @@ import pandas as pd
 import pandera as pa
 from pandera.typing import DataFrame
 
+from sklearn.base import is_classifier, is_regressor
+from typing import Literal, Any
+
 class ExplanationModel(pa.DataFrameModel):
     feature: str
     score: float = pa.Field(ge=0)
@@ -23,19 +26,30 @@ class ExplainerWrapper:
     This class ensures that all explainer classes have the same interface, making it easier to use them interchangeably in the AggregatedExplainer class.
     """
 
-    def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None):
-        self.clf = clf
+    def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
+                 mode: Literal["classification", "regression", "auto"] = "auto"):
+        self.model = model
 
-        if hasattr(clf, 'predict_proba') and predict_proba is None:
-            self.predict_proba = clf.predict_proba
-        elif predict_proba is not None:
-            self.predict_proba = predict_proba
+        if predict_fn is None:
+            if hasattr(self.model, 'predict_proba'):
+                self.predict_fn = self.model.predict_proba
+            elif hasattr(self.model, 'predict'):
+                self.predict_fn = self.model.predict
+            else:
+                raise ValueError('Could not find a predict or predict_proba method in the model. Please provide a value for the predict_fn parameter.')
         else:
-            raise ValueError('The classifier does not have a predict_proba method and no predict_proba_function was provided.')
+            self.predict_fn = predict_fn
+        
+        if mode == "auto":
+            if is_classifier(self.model):
+                self.mode = "classification"
+            elif is_regressor(self.model):
+                self.mode = "regression"
+            else:
+                raise ValueError("Could not determine the mode of the model. Please provide a value for the mode parameter.")
 
         self.X_train = X_train
         self.categorical_feature_names = categorical_feature_names
-
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         """
@@ -46,36 +60,44 @@ class ExplainerWrapper:
 
 class LimeWrapper(ExplainerWrapper):
 
-    def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None):
-        super().__init__(clf, X_train, categorical_feature_names, predict_proba)
+    def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
+                 mode: Literal["classification", "regression", "auto"] = "auto"):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode)
         
-        self.explainer = LimeTabularExplainer(self.X_train.values, feature_names=self.X_train.columns, discretize_continuous=False)
+        self.explainer = LimeTabularExplainer(self.X_train.values, feature_names=self.X_train.columns, discretize_continuous=False, mode=self.mode)
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
-        lime_exp = self.explainer.explain_instance(np.array(instance_data_row), self.predict_proba, num_features=len(self.X_train.columns))
+        lime_exp = self.explainer.explain_instance(np.array(instance_data_row), self.predict_fn, num_features=len(self.X_train.columns))
         
-        ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])    
+        ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])
         ranking['score'] = ranking['score'].apply(lambda x: abs(x))
         return DataFrame[ExplanationModel](ranking)
 
 class ShapTabularTreeWrapper(ExplainerWrapper):
     
-        def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None, **additional_explainer_args):
-            super().__init__(clf, X_train, categorical_feature_names, predict_proba)
-            
-            self.explainer = shap.TreeExplainer(clf, **additional_explainer_args)
+    def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [],
+                 predict_fn: callable = None, **additional_explainer_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn)
         
-        def explain_instance(self, instance_data_row: np.ndarray) -> DataFrame[ExplanationModel]:
-            if isinstance(instance_data_row, pd.Series):
-                instance_data_row = instance_data_row.to_numpy()
-            
-            shap_values = self.explainer.shap_values(instance_data_row)
-            predicted_class = np.argmax(self.predict_proba(instance_data_row.reshape(1, -1))) # Only grab shap values for the predicted class, mirroring lime behavior
-
-            ranking = pd.DataFrame(list(zip(self.X_train.columns, shap_values[:, predicted_class])), columns=['feature', 'score'])
-            ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
-            ranking['score'] = ranking['score'].apply(lambda x: abs(x))
-            return DataFrame[ExplanationModel](ranking)
+        self.explainer = shap.TreeExplainer(self.model,
+                                            data=self.X_train if self.mode == "regression" else None,
+                                            **additional_explainer_args)
+    
+    def explain_instance(self, instance_data_row: np.ndarray) -> DataFrame[ExplanationModel]:
+        if isinstance(instance_data_row, pd.Series):
+            instance_data_row = instance_data_row.to_numpy()
+        
+        shap_values = self.explainer.shap_values(instance_data_row)
+        if self.mode == "classification":
+            predicted_class = np.argmax(self.predict_fn(instance_data_row.reshape(1, -1))) # Only grab shap values for the predicted class, mirroring lime behavior
+            attributions = shap_values[:, predicted_class]
+        elif self.mode == "regression":
+            attributions = shap_values
+        
+        ranking = pd.DataFrame(list(zip(self.X_train.columns, attributions)), columns=['feature', 'score'])
+        ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
+        ranking['score'] = ranking['score'].apply(lambda x: abs(x))
+        return DataFrame[ExplanationModel](ranking)
 
 class AnchorWrapper(ExplainerWrapper):
     """
@@ -84,10 +106,11 @@ class AnchorWrapper(ExplainerWrapper):
     the lower the coverage, the more impactful the feature is, thus the higher the score.
     """
 
-    def __init__(self, clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None):
-        super().__init__(clf, X_train, categorical_feature_names, predict_proba)
+    def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
+                 mode: Literal["classification", "regression", "auto"] = "auto"):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode)
         
-        self.explainer = AnchorTabular(predictor=self.predict_proba, feature_names=self.X_train.columns) # TODO: fix parameters
+        self.explainer = AnchorTabular(predictor=self.predict_fn, feature_names=self.X_train.columns) # TODO: fix parameters
         self.explainer.fit(self.X_train.values)
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:

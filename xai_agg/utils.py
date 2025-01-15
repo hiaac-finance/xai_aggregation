@@ -108,7 +108,7 @@ def evaluate_aggregate_explainer(
                         "aggregation_alg": aggregation_alg
                     })
                     
-                    explainer = AggregatedExplainer(clf=clf, X_train=X_train, categorical_feature_names=categorical_feature_names, 
+                    explainer = AggregatedExplainer(model=clf, X_train=X_train, categorical_feature_names=categorical_feature_names, 
                                                     predict_proba=predict_proba, explainer_types=explainer_components, 
                                                     evaluator=evaluator, metrics=metrics, mcdm_method=mcdm_alg, 
                                                     aggregation_algorithm=aggregation_alg, **extra_explainer_params)

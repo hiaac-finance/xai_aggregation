@@ -28,7 +28,7 @@ class AggregatedExplainer(ExplainerWrapper):
 
     Attributes:
         - explainer_types (list[Type[ExplainerWrapper]]): A list of the explainer classes to be used. The classes must inherit from the ExplainerWrapper class, so that they have the same interface and output format.
-        - clf (object): The classifier model whose predictions will be explained.
+        - model: The model whose predictions will be explained.
         - X_train (pd.DataFrame | np.ndarray): The training data used to train the classifier.
         - categorical_feature_names (list[str]): The names of the categorical features that were one-hot-encoded.
         - predict_proba (callable): A function that receives a data row and returns the model's prediction probabilities. If None, the classifier's predict_proba method will be used.
@@ -37,22 +37,22 @@ class AggregatedExplainer(ExplainerWrapper):
         - aggregation_algorithm (str): The rank aggregation algorithm to be used. Options are "wsum" (Weighted Sum), "w_bordafuse" (Weighted BordaFuse), and "w_condorcet" (Weighted Condorcet).
     """
 
-    def __init__(self, explainer_types: list[Type[ExplainerWrapper]], clf, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str], predict_proba: callable = None,
+    def __init__(self, explainer_types: list[Type[ExplainerWrapper]], model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
                  explainer_params_list: dict[Type[ExplainerWrapper], dict] = None,
                  metrics: list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc', 'rb_faithfulness_corr']] = ['complexity', 'sensitivity_spearman', 'faithfulness_corr'],
                  mcdm_method: MCDA_method = pymcdm.methods.TOPSIS(), aggregation_algorithm: Literal["wsum", "w_bordafuse", "w_condorcet"] = "wsum", **kwargs):
-        super().__init__(clf, X_train, categorical_feature_names, predict_proba)
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn)
 
         self.explainer_types = explainer_types
         self.explainers = []
         for ExplainerType in explainer_types:
             extra_params = explainer_params_list.get(ExplainerType, {}) if explainer_params_list is not None else {}
-            self.explainers.append(ExplainerType(clf, X_train, categorical_feature_names, predict_proba=predict_proba, **extra_params))
+            self.explainers.append(ExplainerType(model, X_train, categorical_feature_names, predict_fn=predict_fn, **extra_params))
 
         if kwargs.get('evaluator', None):
             self.xai_evaluator = kwargs['evaluator']
         else:
-            self.xai_evaluator = ExplanationModelEvaluator(clf, X_train, categorical_feature_names, self.predict_proba, kwargs.get('noise_gen_args', {}), **kwargs.get('evaluator_args', {}))
+            self.xai_evaluator = ExplanationModelEvaluator(model, X_train, categorical_feature_names, self.predict_fn, kwargs.get('noise_gen_args', {}), **kwargs.get('evaluator_args', {}))
             self.xai_evaluator.init()
         
         self.metrics = metrics
@@ -86,7 +86,6 @@ class AggregatedExplainer(ExplainerWrapper):
 
         evaluation_matrix = instance_explanation_metrics
 
-        num_metrics = evaluation_matrix.shape[1]
         mcdm_criteria_weights = pymcdm.weights.equal_weights(evaluation_matrix)
 
         mcdm_criteria_types = np.array([1 if x else -1 for x in higher_is_better])
