@@ -175,7 +175,7 @@ class ExplanationModelEvaluator:
         self.was_initialized = True
             
     def faithfullness_correlation(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, len_subset: int = None,
-                                  iterations: int = 10, baseline_strategy: Literal["zeros", "mean"] = "zeros", rank_based = False,
+                                  iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros", rank_based = False,
                                   rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "percentile", explanation: DataFrame[ExplanationModel] = None) -> float:
         """
         This metric measures the correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
@@ -201,6 +201,8 @@ class ExplanationModelEvaluator:
         delta_fs = []
         
         # Done this way so it'll work both on regression and on classification
+        # On sklearn classification, the prediction will be a list of probabilities for each class;
+        # On sklearn regression, the prediction will be a single value.
         prediction = self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0]
         predicted_index = np.argmax(prediction)
         f_x = prediction[predicted_index] if isinstance(prediction, (list, np.ndarray)) else prediction
@@ -412,7 +414,7 @@ class ExplanationModelEvaluator:
 
         if explanation is None:
             if not isinstance(explainer, ExplainerWrapper):
-                explainer = explainer(self.model, self.X_train, self.ohe_categorical_feature_names, predict_fn=self.predict_fn)
+                explainer = explainer(self.model, self.X_train, self.ohe_categorical_feature_names, predict_fn=self.predict_fn, abs_score=False)
             
             explanation = explainer.explain_instance(instance_data_row)
 

@@ -27,7 +27,7 @@ class ExplainerWrapper:
     """
 
     def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
-                 mode: Literal["classification", "regression", "auto"] = "auto"):
+                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True):
         self.model = model
 
         if predict_fn is None:
@@ -52,6 +52,8 @@ class ExplainerWrapper:
 
         self.X_train = X_train
         self.categorical_feature_names = categorical_feature_names
+        
+        self.abs_score = abs_score
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         """
@@ -63,8 +65,8 @@ class ExplainerWrapper:
 class LimeWrapper(ExplainerWrapper):
 
     def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
-                 mode: Literal["classification", "regression", "auto"] = "auto"):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode)
+                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode, abs_score=abs_score)
         
         self.explainer = LimeTabularExplainer(self.X_train.values, feature_names=self.X_train.columns, discretize_continuous=False, mode=self.mode)
     
@@ -72,14 +74,15 @@ class LimeWrapper(ExplainerWrapper):
         lime_exp = self.explainer.explain_instance(np.array(instance_data_row), self.predict_fn, num_features=len(self.X_train.columns))
         
         ranking = pd.DataFrame(lime_exp.as_list(), columns=['feature', 'score'])
-        ranking['score'] = ranking['score'].apply(lambda x: abs(x))
+        if self.abs_score:
+            ranking['score'] = ranking['score'].apply(lambda x: abs(x))
         return DataFrame[ExplanationModel](ranking)
 
 class ShapTabularTreeWrapper(ExplainerWrapper):
     
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [],
-                 predict_fn: callable = None, **additional_explainer_args):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn)
+                 predict_fn: callable = None, abs_score: bool = True, **additional_explainer_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, abs_score=abs_score)
         
         self.explainer = shap.TreeExplainer(self.model,
                                             data=self.X_train if self.mode == "regression" else None,
@@ -98,15 +101,15 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
         
         ranking = pd.DataFrame(list(zip(self.X_train.columns, attributions)), columns=['feature', 'score'])
         ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
-        ranking['score'] = ranking['score'].apply(lambda x: abs(x))
+        if self.abs_score:
+            ranking['score'] = ranking['score'].apply(lambda x: abs(x))
         return DataFrame[ExplanationModel](ranking)
 
 class ShapTabularKernelWrapper(ExplainerWrapper):
     
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [],
-                 predict_fn: callable = None, **additional_explainer_args):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn)
-        
+                 predict_fn: callable = None, abs_score: bool = True, **additional_explainer_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, abs_score=abs_score)
         
         self.explainer = shap.KernelExplainer(self.predict_fn, data=self.X_train, **additional_explainer_args)
     
@@ -123,7 +126,8 @@ class ShapTabularKernelWrapper(ExplainerWrapper):
         
         ranking = pd.DataFrame(list(zip(self.X_train.columns, attributions)), columns=['feature', 'score'])
         ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
-        ranking['score'] = ranking['score'].apply(lambda x: abs(x))
+        if self.abs_score:
+            ranking['score'] = ranking['score'].apply(lambda x: abs(x))
         return DataFrame[ExplanationModel](ranking)
 
 class AnchorWrapper(ExplainerWrapper):
@@ -134,8 +138,8 @@ class AnchorWrapper(ExplainerWrapper):
     """
 
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
-                 mode: Literal["classification", "regression", "auto"] = "auto"):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode)
+                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode, abs_score=abs_score)
         
         self.explainer = AnchorTabular(predictor=self.predict_fn, feature_names=self.X_train.columns) # TODO: fix parameters
         self.explainer.fit(self.X_train.values)

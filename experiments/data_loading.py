@@ -181,3 +181,30 @@ def load_pakdd2010_data():
     print(f'ROC AUC: {roc_auc_score(y_test, y_pred)}')
     
     return dataset_name, preprocessed_data, categorical_features, X, y, X_train, X_test, y_train, y_test, clf
+
+def load_wdbc_dataset():
+    raw_data = pd.read_csv('../data/wdbc.csv')
+    # Specify header:
+    raw_data.columns = ['ID', 'Diagnosis'] + [str for i in range(1, 4) for str in [f"radius_{i}", f"texture_{i}", f"perimeter_{i}", f"area_{i}", f"smoothness_{i}", f"compactness_{i}", f"concavity_{i}", f"concave_points_{i}", f"symmetry_{i}", f"fractal_dimension_{i}"]]
+
+    preprocessed_data = raw_data.drop(columns=['ID'])
+
+    preprocessed_data['Diagnosis'] = preprocessed_data['Diagnosis'].map({'M': 1, 'B': 0})
+    preprocessed_data.rename(columns={'Diagnosis': 'DiagnosisIsMalignant'}, inplace=True)
+
+    categorical_features = []
+    
+    X = preprocessed_data.drop(columns=['DiagnosisIsMalignant'])
+    y = preprocessed_data['DiagnosisIsMalignant']
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    clf = RandomForestClassifier(random_state=42)
+    clf.fit(X_train, y_train)
+
+    y_pred = clf.predict(X_test)
+
+    print(f"Accuracy: {accuracy_score(y_test, y_pred)}")
+    print(f"ROC AUC: {roc_auc_score(y_test, y_pred)}")
+    
+    return "WDBC", preprocessed_data, categorical_features, X, y, X_train, X_test, y_train, y_test, clf
