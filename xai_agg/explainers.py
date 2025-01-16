@@ -101,6 +101,31 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
         ranking['score'] = ranking['score'].apply(lambda x: abs(x))
         return DataFrame[ExplanationModel](ranking)
 
+class ShapTabularKernelWrapper(ExplainerWrapper):
+    
+    def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [],
+                 predict_fn: callable = None, **additional_explainer_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn)
+        
+        
+        self.explainer = shap.KernelExplainer(self.predict_fn, data=self.X_train, **additional_explainer_args)
+    
+    def explain_instance(self, instance_data_row: np.ndarray) -> DataFrame[ExplanationModel]:
+        if isinstance(instance_data_row, pd.Series):
+            instance_data_row = instance_data_row.to_numpy()
+        
+        shap_values = self.explainer.shap_values(instance_data_row)
+        if self.mode == "classification":
+            predicted_class = np.argmax(self.predict_fn(instance_data_row.reshape(1, -1))) # Only grab shap values for the predicted class, mirroring lime behavior
+            attributions = shap_values[:, predicted_class]
+        elif self.mode == "regression":
+            attributions = shap_values
+        
+        ranking = pd.DataFrame(list(zip(self.X_train.columns, attributions)), columns=['feature', 'score'])
+        ranking = ranking.sort_values(by='score', ascending=False, key=lambda x: abs(x)).reset_index(drop=True)
+        ranking['score'] = ranking['score'].apply(lambda x: abs(x))
+        return DataFrame[ExplanationModel](ranking)
+
 class AnchorWrapper(ExplainerWrapper):
     """
     Anchor is not a feature-importance-based explainer, but it can be used to generate feature importance scores based on the rules that it generates.

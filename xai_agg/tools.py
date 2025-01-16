@@ -200,6 +200,7 @@ class ExplanationModelEvaluator:
         importance_sums = []
         delta_fs = []
         
+        # Done this way so it'll work both on regression and on classification
         prediction = self.predict_fn(np.array(instance_data_row).reshape(1, -1))[0]
         predicted_index = np.argmax(prediction)
         f_x = prediction[predicted_index] if isinstance(prediction, (list, np.ndarray)) else prediction
@@ -209,8 +210,7 @@ class ExplanationModelEvaluator:
             importance_sums.append(evaluation[0])
             delta_fs.append(evaluation[1])
         
-        print(importance_sums, delta_fs)
-        return abs(spearmanr(importance_sums, delta_fs).correlation)
+        return abs(pearsonr(importance_sums, delta_fs)[0])
 
     def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, predicted_index, len_subset, baseline_strategy, rank_based: bool = False,
                                           rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "sum") -> tuple[float, float]:
@@ -228,7 +228,6 @@ class ExplanationModelEvaluator:
 
         subset_g_x = g_x[g_x['feature'].isin(subset)]
         subset_feature_importances = subset_g_x['score'].values
-        print(subset_feature_importances)
 
         if not rank_based:
             combined_importance = sum(subset_feature_importances)
@@ -244,6 +243,7 @@ class ExplanationModelEvaluator:
             elif rb_alg == "inverse":
                 combined_importance = (1 / sfi_ranking['rank']).sum()
 
+        # Done this way so it'll work both on regression and on classification
         prediction = self.predict_fn(perturbed_instance.to_numpy().reshape(1, -1))[0]
         f_x_perturbed = prediction[predicted_index] if isinstance(prediction, (list, np.ndarray)) else prediction
         delta_f = np.abs(f_x - f_x_perturbed)
@@ -290,9 +290,6 @@ class ExplanationModelEvaluator:
         return np.mean(results)
 
     def _evaluate_sensitivity_iteration(self, original_explainer, instance_data_row, ExplainerType: Type[ExplainerWrapper], method, custom_method, extra_explainer_params):
-        if self.debug:
-            print(f"[sensitivity_concurrent()]: (iteration)")
-
         # Obtain the original explanation:
         original_explanation = original_explainer.explain_instance(instance_data_row)
 
