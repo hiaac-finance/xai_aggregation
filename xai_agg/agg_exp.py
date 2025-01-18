@@ -60,6 +60,7 @@ class AggregatedExplainer(ExplainerWrapper):
         self.aggregation_algorithm = aggregation_algorithm
 
         self.last_explanation_metrics: pd.DataFrame = None
+        self.last_explanation_runs: list[ranx.Run] = None
         
         self._metric_functions = {
             "faithfulness_corr": lambda explainer, instance_data_row: self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10),
@@ -71,23 +72,30 @@ class AggregatedExplainer(ExplainerWrapper):
         }
     
     @staticmethod
-    def _ranking_to_run(feature_importance_ranking: pd.DataFrame) -> ranx.Run:
-        feature_importance_ranking["query"] = "1"
-        return ranx.Run.from_df(feature_importance_ranking, q_id_col="query", doc_id_col="feature", score_col="score")
+    def _ranking_to_run(feature_importance_scores: DataFrame[ExplanationModel]) -> ranx.Run:
+        # fir = get_ranked_explanation(feature_importance_scores, invert=False, epsilon=0)
+        # fir["rank"] = fir["rank"].astype(float)
+        # fir["percentile"] = 1 - (fir['rank'] / fir['rank'].values[-1])
+        # fir["query"] = "1"
+        # return ranx.Run.from_df(fir, q_id_col="query", doc_id_col="feature", score_col="percentile")
+        
+        # Normalize the score column to be between 0 and 1
+        fis = feature_importance_scores.copy()
+        fis["score"] = (fis["score"] - fis["score"].min()) / (fis["score"].max() - fis["score"].min())
+        fis["query"] = "1"
+        return ranx.Run.from_df(fis, q_id_col="query", doc_id_col="feature", score_col="score")
     
     def _get_weights(self, instance_explanation_metrics: np.ndarray, higher_is_better: list[bool]) -> np.ndarray[float]:
         """
         Uses a MCDM algorithm to calculate the weights for each explanation method based on the instance explanation metrics.
 
         Parameters:
-        instance_explanation_metrics (pd.DataFrame): DataFrame containing the instance explanation metrics for each explanation method.
+        instance_explanation_metrics (pd.DataFrame): DataFrMuame containing the instance explanation metrics for each explanation method.
         higher_is_better (list[bool]): A list of booleans indicating whether higher values are preferred for each metric.
         """
 
         evaluation_matrix = instance_explanation_metrics
-
         mcdm_criteria_weights = pymcdm.weights.equal_weights(evaluation_matrix)
-
         mcdm_criteria_types = np.array([1 if x else -1 for x in higher_is_better])
 
         weights = self.mcdm_method(evaluation_matrix, mcdm_criteria_weights, mcdm_criteria_types)
@@ -99,6 +107,7 @@ class AggregatedExplainer(ExplainerWrapper):
         runs = []
         for explainer in self.explainers:
             runs.append(self._ranking_to_run(explainer.explain_instance(instance_data_row)))
+        self.last_explanation_runs = runs
 
         instance_explanation_metrics = []
         for explainer in self.explainers:

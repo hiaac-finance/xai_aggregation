@@ -234,7 +234,8 @@ class ExplanationModelEvaluator:
         if not rank_based:
             combined_importance = sum(subset_feature_importances)
         else:
-            sfi_ranking = get_ranked_explanation(subset_g_x)
+            sfi_ranking = get_ranked_explanation(g_x)[g_x['feature'].isin(subset)]
+            print(sfi_ranking)
             if rb_alg == "sum":
                 combined_importance = -sfi_ranking['rank'].sum()
             elif rb_alg == "percentile":
@@ -309,10 +310,10 @@ class ExplanationModelEvaluator:
             mean_squared_difference = ((original_explanation['score'] - noisy_explanation['score']) ** 2).mean()
             return mean_squared_difference
         elif method == 'spearman':
-            spearman_correlation = spearmanr(original_explanation['score'], noisy_explanation['score']).correlation
+            spearman_correlation = spearmanr(original_explanation['score'], noisy_explanation['score']).statistic
             return abs(spearman_correlation)
         elif method == 'pearson':
-            pearson_correlation = pearsonr(original_explanation['score'], noisy_explanation['score']).correlation
+            pearson_correlation = pearsonr(original_explanation['score'], noisy_explanation['score']).statistic
             return abs(pearson_correlation)
     
     def _sensitivity_sequential(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson'] = 'spearman',
@@ -441,7 +442,9 @@ class RankedExplanationModel(pa.DataFrameModel):
     feature: str
     rank: int = pa.Field(ge=0)
 
-def get_ranked_explanation(scored_explanation: DataFrame[ExplanationModel], fraction: float = None, method: Literal["std", "spread"] = "std", epsilon: float = None) -> DataFrame[RankedExplanationModel]:
+def get_ranked_explanation(scored_explanation: DataFrame[ExplanationModel],
+                           fraction: float = None, method: Literal["std", "spread"] = "std",
+                           epsilon: float = None, invert: bool = False) -> DataFrame[RankedExplanationModel]:
     """
     Assigns a rank to each feature based on the score in the ranking dataframe. Features with similar scores are assigned the same rank.
     
@@ -486,5 +489,8 @@ def get_ranked_explanation(scored_explanation: DataFrame[ExplanationModel], frac
             current_rank += 1
             ranked_explanation.at[i, 'rank'] = current_rank
             max_score_in_rank = scored_explanation.at[i, 'score']
+    
+    if invert:
+        ranked_explanation['rank'] = ranked_explanation['rank'].max() + 1 - ranked_explanation['rank']
     
     return DataFrame[RankedExplanationModel](ranked_explanation)
