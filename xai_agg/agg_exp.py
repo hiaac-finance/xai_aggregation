@@ -60,11 +60,11 @@ class AggregatedExplainer(ExplainerWrapper):
         self.aggregation_algorithm = aggregation_algorithm
 
         self.last_explanation_metrics: pd.DataFrame = None
-        self.last_explanation_runs: list[ranx.Run] = None
+        self.last_explanation_components: list[DataFrame[ExplanationModel]] = []
         
         self._metric_functions = {
             "faithfulness_corr": lambda explainer, instance_data_row: self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10),
-            "rb_faithfulness_corr": lambda explainer, instance_data_row: self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=10, rank_based=True, rb_alg="percentile"),
+            "rb_faithfulness_corr": lambda explainer, instance_data_row: self.xai_evaluator.faithfullness_correlation(explainer, instance_data_row, iterations=100, len_subset=1, rank_based=True, rb_alg="inverse"),
             "sensitivity_spearman": self.xai_evaluator.sensitivity,
             "complexity": self.xai_evaluator.complexity,
             "nrc": self.xai_evaluator.nrc,
@@ -73,17 +73,18 @@ class AggregatedExplainer(ExplainerWrapper):
     
     @staticmethod
     def _ranking_to_run(feature_importance_scores: DataFrame[ExplanationModel]) -> ranx.Run:
-        # fir = get_ranked_explanation(feature_importance_scores, invert=False, epsilon=0)
-        # fir["rank"] = fir["rank"].astype(float)
-        # fir["percentile"] = 1 - (fir['rank'] / fir['rank'].values[-1])
-        # fir["query"] = "1"
-        # return ranx.Run.from_df(fir, q_id_col="query", doc_id_col="feature", score_col="percentile")
+        fir = get_ranked_explanation(feature_importance_scores, invert=False, epsilon=0)
+        fir["rank"] = fir["rank"].astype(float)
+        fir["percentile"] = 1 - (fir['rank'] / fir['rank'].values[-1])
+        fir["inverse_sq"] = 1 / fir["rank"] ** 2
+        fir["query"] = "1"
+        return ranx.Run.from_df(fir, q_id_col="query", doc_id_col="feature", score_col="inverse_sq")
         
-        # Normalize the score column to be between 0 and 1
-        fis = feature_importance_scores.copy()
-        fis["score"] = (fis["score"] - fis["score"].min()) / (fis["score"].max() - fis["score"].min())
-        fis["query"] = "1"
-        return ranx.Run.from_df(fis, q_id_col="query", doc_id_col="feature", score_col="score")
+        # # Normalize the score column to be between 0 and 1
+        # fis = feature_importance_scores.copy()
+        # fis["score"] = (fis["score"] - fis["score"].min()) / (fis["score"].max() - fis["score"].min())
+        # fis["query"] = "1"
+        # return ranx.Run.from_df(fis, q_id_col="query", doc_id_col="feature", score_col="score")
     
     def _get_weights(self, instance_explanation_metrics: np.ndarray, higher_is_better: list[bool]) -> np.ndarray[float]:
         """
@@ -105,9 +106,11 @@ class AggregatedExplainer(ExplainerWrapper):
 
     def explain_instance(self, instance_data_row: pd.Series) -> pd.DataFrame:
         runs = []
+        self.last_explanation_components = []
         for explainer in self.explainers:
-            runs.append(self._ranking_to_run(explainer.explain_instance(instance_data_row)))
-        self.last_explanation_runs = runs
+            component_explanation = explainer.explain_instance(instance_data_row)
+            self.last_explanation_components.append(component_explanation)
+            runs.append(self._ranking_to_run(component_explanation))
 
         instance_explanation_metrics = []
         for explainer in self.explainers:

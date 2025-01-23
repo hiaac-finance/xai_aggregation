@@ -110,7 +110,7 @@ class AutoencoderNoisyDataGenerator():
 
                 # Replace the selected features with the neighbor's features
                 X_noisy.iloc[i, features_to_replace] = self.X.iloc[neighbor_idx, features_to_replace]
-
+                
         return X_noisy
 
 class ExplanationModelEvaluator:
@@ -234,12 +234,12 @@ class ExplanationModelEvaluator:
         if not rank_based:
             combined_importance = sum(subset_feature_importances)
         else:
-            sfi_ranking = get_ranked_explanation(g_x)[g_x['feature'].isin(subset)]
-            print(sfi_ranking)
+            ranked_g_x = get_ranked_explanation(g_x)
+            sfi_ranking = ranked_g_x[g_x['feature'].isin(subset)]
             if rb_alg == "sum":
                 combined_importance = -sfi_ranking['rank'].sum()
             elif rb_alg == "percentile":
-                percentiles = 1 - (sfi_ranking['rank'] / sfi_ranking['rank'].values[-1])
+                percentiles = 1 - (sfi_ranking['rank'] / ranked_g_x['rank'].values[-1])
                 combined_importance = percentiles.sum()
             elif rb_alg == "avg":
                 combined_importance = -sfi_ranking['rank'].mean()
@@ -292,17 +292,18 @@ class ExplanationModelEvaluator:
 
         return np.mean(results)
 
-    def _evaluate_sensitivity_iteration(self, original_explainer, instance_data_row, ExplainerType: Type[ExplainerWrapper], method, custom_method, extra_explainer_params):
+    def _evaluate_sensitivity_iteration(self, original_explainer: ExplainerWrapper, instance_data_row, ExplainerType: Type[ExplainerWrapper], method, custom_method, extra_explainer_params):
         # Obtain the original explanation:
         original_explanation = original_explainer.explain_instance(instance_data_row)
 
         # Obtain the noisy explanation:
         noisy_data = self.noisy_data_generator.generate_noisy_data()
-        noisy_explainer = ExplainerType(model=self.model, X_train=noisy_data, categorical_feature_names=self.ohe_categorical_feature_names, predict_fn=self.predict_fn, **extra_explainer_params)
+        noisy_explainer = ExplainerType(model=self.model, X_train=noisy_data, categorical_feature_names=self.ohe_categorical_feature_names, predict_fn=self.predict_fn, on_noise=True, **extra_explainer_params)
         noisy_explanation = noisy_explainer.explain_instance(instance_data_row)
 
         # Align the two explanations
         noisy_explanation = noisy_explanation.set_index('feature').loc[original_explanation['feature']].reset_index()
+        original_explainer.X_train
 
         if custom_method is not None:
             return custom_method(original_explanation, noisy_explanation)

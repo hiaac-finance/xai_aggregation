@@ -27,7 +27,7 @@ class ExplainerWrapper:
     """
 
     def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
-                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True):
+                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True, **additional_args):
         self.model = model
 
         if predict_fn is None:
@@ -54,6 +54,8 @@ class ExplainerWrapper:
         self.categorical_feature_names = categorical_feature_names
         
         self.abs_score = abs_score
+        
+        self.additional_args = additional_args
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         """
@@ -65,8 +67,8 @@ class ExplainerWrapper:
 class LimeWrapper(ExplainerWrapper):
 
     def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
-                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode, abs_score=abs_score)
+                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True, **additional_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode, abs_score=abs_score, additional_agrs=additional_args)
         
         self.explainer = LimeTabularExplainer(self.X_train.values, feature_names=self.X_train.columns, discretize_continuous=False, mode=self.mode)
     
@@ -81,18 +83,19 @@ class LimeWrapper(ExplainerWrapper):
 class ShapTabularTreeWrapper(ExplainerWrapper):
     
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [],
-                 predict_fn: callable = None, abs_score: bool = True, **additional_explainer_args):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, abs_score=abs_score)
+                 predict_fn: callable = None, abs_score: bool = True, **additional_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, abs_score=abs_score, additional_args=additional_args)
         
         self.explainer = shap.TreeExplainer(self.model,
-                                            data=self.X_train if self.mode == "regression" else None,
-                                            **additional_explainer_args)
+                                            data=self.X_train)
+        
+        self.on_noise = self.additional_args.get('on_noise', False)
     
     def explain_instance(self, instance_data_row: np.ndarray) -> DataFrame[ExplanationModel]:
         if isinstance(instance_data_row, pd.Series):
             instance_data_row = instance_data_row.to_numpy()
         
-        shap_values = self.explainer.shap_values(instance_data_row)
+        shap_values = self.explainer.shap_values(instance_data_row, check_additivity=False) # when applying on noisy data, additivity check will fail, because the explainer's data wont match the model's
         if self.mode == "classification":
             predicted_class = np.argmax(self.predict_fn(instance_data_row.reshape(1, -1))) # Only grab shap values for the predicted class, mirroring lime behavior
             attributions = shap_values[:, predicted_class]
@@ -108,10 +111,10 @@ class ShapTabularTreeWrapper(ExplainerWrapper):
 class ShapTabularKernelWrapper(ExplainerWrapper):
     
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [],
-                 predict_fn: callable = None, abs_score: bool = True, **additional_explainer_args):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, abs_score=abs_score)
+                 predict_fn: callable = None, abs_score: bool = True, **additional_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, abs_score=abs_score, additional_args=additional_args)
         
-        self.explainer = shap.KernelExplainer(self.predict_fn, data=self.X_train, **additional_explainer_args)
+        self.explainer = shap.KernelExplainer(self.predict_fn, data=self.X_train, **additional_args)
     
     def explain_instance(self, instance_data_row: np.ndarray) -> DataFrame[ExplanationModel]:
         if isinstance(instance_data_row, pd.Series):
@@ -138,8 +141,8 @@ class AnchorWrapper(ExplainerWrapper):
     """
 
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
-                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True):
-        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode, abs_score=abs_score)
+                 mode: Literal["classification", "regression", "auto"] = "auto", abs_score: bool=True, **additional_args):
+        super().__init__(model, X_train, categorical_feature_names, predict_fn=predict_fn, mode=mode, abs_score=abs_score, additional_args=additional_args)
         
         self.explainer = AnchorTabular(predictor=self.predict_fn, feature_names=self.X_train.columns) # TODO: fix parameters
         self.explainer.fit(self.X_train.values)
