@@ -176,7 +176,7 @@ class ExplanationModelEvaluator:
             
     def faithfullness_correlation(self, explainer: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, len_subset: int = None,
                                   iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros", rank_based = False,
-                                  rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "percentile", explanation: DataFrame[ExplanationModel] = None) -> float:
+                                  rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "inverse", explanation: DataFrame[ExplanationModel] = None) -> float:
         """
         This metric measures the correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
         Referenced from: https://arxiv.org/abs/2005.00631
@@ -215,7 +215,7 @@ class ExplanationModelEvaluator:
         return abs(pearsonr(importance_sums, delta_fs)[0])
 
     def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, predicted_index, len_subset, baseline_strategy, rank_based: bool = False,
-                                          rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "sum") -> tuple[float, float]:
+                                          rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "inverse") -> tuple[float, float]:
         subset = np.random.choice(instance_data_row.index.values, len_subset if len_subset else len(instance_data_row) // 4, replace=False)
         perturbed_instance = instance_data_row.copy()
 

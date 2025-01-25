@@ -14,7 +14,7 @@ def evaluate_aggregate_explainer(
         explainer_components_sets: list[list[Type[ExplainerWrapper]]] = [[LimeWrapper, ShapTabularTreeWrapper, AnchorWrapper]],
         mcdm_algs: list[MCDA_method] = [pymcdm.methods.TOPSIS()],
         aggregation_algs: list[Literal["wsum", "w_bordafuse", "w_condorcet"]] = ["wsum"],
-        metrics_sets: list[list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc']]] = [['nrc', 'sensitivity_spearman', 'faithfulness_corr']],
+        metrics_sets: list[list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', "rb_faithfulness_corr", 'nrc']]] = [['nrc', 'sensitivity_spearman', 'rb_faithfulness_corr']],
         extra_explainer_params: dict = {},
         n_instances: int = 10, indexes: list[int] = None,
         mp_jobs = 10, **kwargs) -> list[list[pd.DataFrame]]:
