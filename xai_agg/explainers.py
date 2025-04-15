@@ -1,3 +1,21 @@
+"""
+Wrapper classes for explainer algorithms.
+
+This module provides a consistent interface to various explainer algorithms
+by wrapping them in the ExplainerWrapper abstract base class and its
+subclasses. Currently supports wrappers for LIME, SHAP (Tree and Kernel),
+and Anchor explainers.
+
+Classes:
+--------
+    ExplanationModel: Pandera model for explanation data
+    ExplainerWrapper: Abstract base class for explainer wrappers
+    LimeWrapper: Wrapper for LIME explainer
+    ShapTabularTreeWrapper: Wrapper for SHAP Tree explainer
+    ShapTabularKernelWrapper: Wrapper for SHAP Kernel explainer
+    AnchorWrapper: Wrapper for Anchor explainer
+"""
+
 import shap
 from lime.lime_tabular import LimeTabularExplainer
 from alibi.explainers import AnchorTabular # why not used the original anchor package?
@@ -15,15 +33,12 @@ class ExplanationModel(pa.DataFrameModel):
     feature: str
     score: float = pa.Field(ge=0)
 
-"""
-This script defines the ExplainerWrapper abstract base class and its subclasses, which are used to wrap the explainer classes,
-such as the ones from the LIME, SHAP, and Anchor libraries.
-"""
-
 class ExplainerWrapper:
     """
     Wrapper abstract base class for featuer-importance-based explainer classes.
-    This class ensures that all explainer classes have the same interface, making it easier to use them interchangeably in the AggregatedExplainer class.
+    
+    This class ensures that all explainer classes have the same interface, making it
+    easier to use them interchangeably in the AggregatedExplainer class.
     """
 
     def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,

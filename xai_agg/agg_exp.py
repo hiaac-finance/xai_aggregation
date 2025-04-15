@@ -23,18 +23,43 @@ from pathos.multiprocessing import ProcessingPool as Pool
 
 class AggregatedExplainer(ExplainerWrapper):
     """
-    This class aggregates multiple feature-importance-based explanation methods to provide a single explanation for a given instance.
-    The aggregated explanation is calculated using a weighted rank aggregation algorithm, whose weights are calculated using a MCDM algorithm based on the instance explanation metrics.
-
-    Attributes:
-        - explainer_types (list[Type[ExplainerWrapper]]): A list of the explainer classes to be used. The classes must inherit from the ExplainerWrapper class, so that they have the same interface and output format.
-        - model: The model whose predictions will be explained.
-        - X_train (pd.DataFrame | np.ndarray): The training data used to train the classifier.
-        - categorical_feature_names (list[str]): The names of the categorical features that were one-hot-encoded.
-        - predict_proba (callable): A function that receives a data row and returns the model's prediction probabilities. If None, the classifier's predict_proba method will be used.
-        - explainer_params_list (dict[Type[ExplainerWrapper], dict]): A dictionary containing the parameters to be passed to each explainer class, in case they require additional parameters.
-            it should be in the format {ExplainerType: {param1: value1, param2: value2, ...}}
-        - aggregation_algorithm (str): The rank aggregation algorithm to be used. Options are "wsum" (Weighted Sum), "w_bordafuse" (Weighted BordaFuse), and "w_condorcet" (Weighted Condorcet).
+    .. class:: AggregatedExplainer(ExplainerWrapper)
+        Aggregates multiple feature-importance-based explanation methods to provide a single explanation.
+        This class combines various explanation methods using a weighted rank aggregation algorithm. 
+        The weights are calculated using a Multi-Criteria Decision Making (MCDM) algorithm based on 
+        instance explanation metrics.
+        :param explainer_types: A list of the explainer classes to be used. 
+                                Classes must inherit from ExplainerWrapper.
+        :type explainer_types: list[Type[ExplainerWrapper]]
+        :param model: The model whose predictions will be explained.
+        :param X_train: The training data used to train the classifier.
+        :type X_train: pd.DataFrame | np.ndarray
+        :param categorical_feature_names: The names of categorical features that were one-hot-encoded.
+        :type categorical_feature_names: list[str], optional
+        :param predict_fn: A function that receives a data row and returns the model's prediction probabilities.
+                          If None, the classifier's predict_proba method will be used.
+        :type predict_fn: callable, optional
+        :param explainer_params_list: Parameters to be passed to each explainer class.
+                                     Format: {ExplainerType: {param1: value1, param2: value2, ...}}
+        :type explainer_params_list: dict[Type[ExplainerWrapper], dict], optional
+        :param metrics: Metrics used to evaluate explanations and calculate weights.
+        :type metrics: list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc', 'rb_faithfulness_corr']], optional
+        :param mcdm_method: The MCDM method used to calculate weights.
+        :type mcdm_method: MCDA_method, optional
+        :param aggregation_algorithm: The rank aggregation algorithm.
+                                     Options: "wsum" (Weighted Sum), "w_bordafuse" (Weighted BordaFuse), 
+                                     or "w_condorcet" (Weighted Condorcet).
+        :type aggregation_algorithm: Literal["wsum", "w_bordafuse", "w_condorcet"], optional
+        .. method:: explain_instance(instance_data_row)
+            Generates an aggregated explanation for the given instance.
+            :param instance_data_row: The data instance to explain.
+            :type instance_data_row: pd.Series
+            :return: A DataFrame containing the aggregated feature importance scores.
+            :rtype: pd.DataFrame
+        .. method:: get_last_explanation_info()
+            Returns explanation metrics and weights for the last explained instance.
+            :return: DataFrame with metrics and weights for each explainer type.
+            :rtype: pd.DataFrame
     """
 
     def __init__(self, explainer_types: list[Type[ExplainerWrapper]], model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
@@ -88,11 +113,30 @@ class AggregatedExplainer(ExplainerWrapper):
     
     def _get_weights(self, instance_explanation_metrics: np.ndarray, higher_is_better: list[bool]) -> np.ndarray[float]:
         """
-        Uses a MCDM algorithm to calculate the weights for each explanation method based on the instance explanation metrics.
-
-        Parameters:
-        instance_explanation_metrics (pd.DataFrame): DataFrMuame containing the instance explanation metrics for each explanation method.
-        higher_is_better (list[bool]): A list of booleans indicating whether higher values are preferred for each metric.
+            Calculate weights for each explanation method using a MCDM algorithm based on instance metrics.
+            
+            This method applies a Multi-Criteria Decision Making (MCDM) algorithm to determine 
+            the relative importance of each explanation method according to their performance 
+            on various metrics.
+            
+            Parameters
+            ----------
+            instance_explanation_metrics : np.ndarray
+                Array containing the instance explanation metrics for each explanation method.
+                Each row represents an explanation method and each column represents a metric.
+            
+            higher_is_better : list[bool]
+                List indicating whether higher values are preferred for each metric.
+                True means higher values are better, False means lower values are better.
+            
+            Returns
+            -------
+            np.ndarray
+                Normalized weights for each explanation method, summing to 1.
+                
+            Notes
+            -----
+            The calculated weights are also stored in the `_last_explanation_weights` attribute.
         """
 
         evaluation_matrix = instance_explanation_metrics
@@ -105,6 +149,32 @@ class AggregatedExplainer(ExplainerWrapper):
         return weights
 
     def explain_instance(self, instance_data_row: pd.Series) -> pd.DataFrame:
+        """
+        Generate an explanation for a single instance by aggregating explanations from multiple explainers.
+        This method:
+        1. Obtains individual explanations from each explainer
+        2. Converts explanations to ranking runs
+        3. Computes performance metrics for each explainer
+        4. Determines aggregation weights based on metrics
+        5. Fuses the individual runs using the specified aggregation algorithm
+        
+        Parameters
+        ----------
+        instance_data_row : pd.Series
+            The instance to explain, represented as a pandas Series.
+            
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing the aggregated explanation, with features as rows
+            and their importance scores as values.
+            
+        Notes
+        -----
+        The method stores the individual explainer results in `last_explanation_components`
+        and metrics in `_last_explanation_metrics` for later inspection.
+        """
+        
         runs = []
         self.last_explanation_components = []
         for explainer in self.explainers:
@@ -131,7 +201,18 @@ class AggregatedExplainer(ExplainerWrapper):
 
     def get_last_explanation_info(self) -> pd.DataFrame:
         """
-        Returns a DataFrame containing the explanation metrics and weights for the aggregated explainer types for the last explained instance.
+        Returns a DataFrame containing the explanation metrics and weights for the aggregated explainer types
+        for the last explained instance.
+        
+        The DataFrame's rows are indexed by the explainer class names, with columns for each metric used
+        in the aggregation plus a 'weight' column showing the weight assigned to each explainer.
+        
+        Returns:
+        --------
+            pd.DataFrame: A DataFrame with explanation metrics and weights where:
+                - Each row corresponds to an explainer in self.explainers
+                - Columns include all metrics in self.metrics plus a 'weight' column
+                - Index consists of the explainer class names
         """
 
         explanation_info = pd.DataFrame(self._last_explanation_metrics, columns=self.metrics, index=[explainer.__class__.__name__ for explainer in self.explainers])

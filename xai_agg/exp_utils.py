@@ -138,10 +138,44 @@ def evaluate_aggregate_explainer(
 
 @dataclass
 class ExperimentRun:
+    """
+    A dataclass representing a single experiment run.
+
+    This class is used to store the metadata and results of an experiment run. It can be
+    used to keep track of experimental settings, hyperparameters, and outcomes.
+
+    Attributes
+    ----------
+    metadata : dict
+        A dictionary containing metadata about the experiment run, such as
+        hyperparameters, dataset information, model configurations, etc.
+    results : any
+        The results of the experiment run. This can be any data type depending on
+        the specific experiment, such as metrics, model outputs, or evaluation results.
+    """
     metadata: dict
     results: any
 
 def get_expconfig_mean_results(exp: ExperimentRun, config: int):
+    """
+    Calculate the mean results for a specific experiment configuration.
+    
+    This function aggregates all results for a given configuration in an experiment
+    and computes the mean values grouped by the 0-level index.
+    
+    Parameters
+    ----------
+    exp : ExperimentRun
+        The experiment run object containing results.
+    config : int
+        The configuration index to retrieve results for.
+    
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame containing the mean values of all results for the specified
+        configuration, grouped by the 0-level index.
+    """
     config_results = exp.results[config]
     return pd.concat(config_results).groupby(level=0).mean()
 
@@ -193,6 +227,28 @@ def count_worst_case_avoidances(config_results: list[pd.DataFrame], is_more_bett
 
 
 def get_average_metric_rank(config_results: list[pd.DataFrame], is_more_better: list[bool]):
+    """
+    Calculate the average rank of each method across multiple instances for each metric.
+    For each instance in config_results, ranks are assigned to methods based on their performance
+    for each metric, considering whether higher or lower values are better. Then, the average
+    rank across all instances is calculated.
+    
+    Parameters
+    ----------
+    config_results : list[pd.DataFrame]
+        List of DataFrames where each DataFrame contains the results for one instance.
+        Each DataFrame should have methods as indices and metrics as columns.
+    is_more_better : list[bool]
+        List of boolean values indicating whether higher values are better for each metric.
+        True means higher values are better, False means lower values are better.
+        Length should match the number of columns in each DataFrame in config_results.
+        
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the average rank of each method across all instances.
+        Methods are in the index, and metrics are in the columns.
+    """
     ranks = []
 
     for instance_result in config_results:
@@ -213,6 +269,37 @@ def get_average_metric_rank(config_results: list[pd.DataFrame], is_more_better: 
 from IPython.display import display
 
 def present_experiment_run(exp: ExperimentRun, labels: list[Any], is_more_better: list[bool] = [False, True, True]):
+    """
+    Presents and analyzes results from an experiment run.
+
+    This function displays the results for each method in the experiment, calculates worst-case
+    avoidances, shows the average results, and computes average metric rankings.
+
+    Parameters
+    ----------
+    exp : ExperimentRun
+        The experiment run object containing results to be presented.
+        
+    labels : list
+        Labels for the different methods being compared in the experiment.
+        
+    is_more_better : list[bool], optional
+        List of boolean flags indicating for each metric whether higher values are better.
+        Defaults to [False, True, True].
+
+    Returns
+    -------
+    None
+        This function only prints and displays results, it doesn't return any value.
+
+    Notes
+    -----
+    The function displays various performance metrics and statistics for each method:
+    - Raw results
+    - Worst case avoidance counts (for all metrics and for 2/3 of metrics)
+    - Average results across experiment configurations
+    - Average rank for each metric
+    """
     for i, method in enumerate(labels):
         print(f"{method}:\n")
         display(exp.results[i])
