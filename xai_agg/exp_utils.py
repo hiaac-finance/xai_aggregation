@@ -1,3 +1,36 @@
+"""
+Experiment Utilities
+====================
+
+This module provides utility functions for conducting, analyzing, and visualizing
+experiments with aggregated explainer models. It includes tools for evaluating explainer
+performance across different metrics, calculating statistics, and presenting results.
+
+Functions
+---------
+
+evaluate_aggregate_explainer
+    Evaluate aggregated explainers across various configurations, metrics, and algorithms.
+
+get_expconfig_mean_results
+    Calculate mean results for a specific experiment configuration.
+
+count_worst_case_avoidances
+    Count instances where an explainer avoids worst-case performance scenarios.
+
+get_average_metric_rank
+    Calculate average rank of each method across multiple instances for each metric.
+
+present_experiment_run
+    Present and analyze comprehensive results from an experiment run.
+
+Classes
+-------
+
+ExperimentRun
+    Data container for storing experiment metadata and results.
+"""
+
 from typing import Literal
 import pandas as pd
 import pymcdm
@@ -21,44 +54,43 @@ def evaluate_aggregate_explainer(
     
     """
     Evaluate the aggregate explainer with various settings.
+    
     This function evaluates the aggregate explainer by iterating over different combinations of explainer components,
     MCDM algorithms, aggregation algorithms, and metrics. It returns the results as a list of lists of dataframes,
     where each dataframe corresponds to an instance check, and each list of dataframes corresponds to a specific
     setting configuration.
 
-    Parameters:
-    -----------
-    clf : object
-        The classifier model to be explained.
-    X_train : pd.DataFrame
-        The training dataset.
-    X_test : pd.DataFrame
-        The test dataset.
-    categorical_feature_names : list[str]
-        List of names of categorical features.
-    predict_proba : callable, optional
-        Function to predict probabilities. If None, clf.predict_proba is used.
-    explainer_components_sets : list[list[Type[ExplainerWrapper]]], optional
-        List of lists of explainer components to be used in the aggregate explainer.
-    mcdm_algs : list[MCDA_method], optional
-        List of MCDM (Multi-Criteria Decision Making) algorithms to be used.
-    aggregation_algs : list[Literal["wsum", "w_bordafuse", "w_condorcet"]], optional
-        List of aggregation algorithms to be used.
-    metrics_sets : list[list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc']]], optional
-        List of lists of metrics to be evaluated.
-    n_instances : int, optional
-        Number of instances to be evaluated. Default is 10.
-    indexes : list[int], optional
-        List of indexes of instances to be evaluated. If None, random instances are selected.
-    mp_jobs : int, optional
-        Number of parallel jobs to be used. Default is 10.
-    **kwargs : dict
-        Additional keyword arguments.
-        
-    Returns:
-    --------
-    list[list[pd.DataFrame]]
-        A list of lists of dataframes containing the evaluation results for each instance and setting configuration.
+    :param clf: The classifier model to be explained
+    :type clf: object
+    :param X_train: The training dataset
+    :type X_train: pd.DataFrame
+    :param X_test: The test dataset
+    :type X_test: pd.DataFrame
+    :param categorical_feature_names: List of names of categorical features
+    :type categorical_feature_names: list[str]
+    :param predict_proba: Function to predict probabilities. If None, clf.predict_proba is used
+    :type predict_proba: callable, optional
+    :param explainer_components_sets: List of lists of explainer components to be used in the aggregate explainer
+    :type explainer_components_sets: list[list[Type[ExplainerWrapper]]], optional
+    :param mcdm_algs: List of MCDM (Multi-Criteria Decision Making) algorithms to be used
+    :type mcdm_algs: list[MCDA_method], optional
+    :param aggregation_algs: List of aggregation algorithms to be used
+    :type aggregation_algs: list[Literal["wsum", "w_bordafuse", "w_condorcet"]], optional
+    :param metrics_sets: List of lists of metrics to be evaluated
+    :type metrics_sets: list[list[Literal['complexity', 'sensitivity_spearman', 'faithfulness_corr', 'nrc']]], optional
+    :param extra_explainer_params: Additional parameters for explainers
+    :type extra_explainer_params: dict, optional
+    :param n_instances: Number of instances to be evaluated. Default is 10
+    :type n_instances: int, optional
+    :param indexes: List of indexes of instances to be evaluated. If None, random instances are selected
+    :type indexes: list[int], optional
+    :param mp_jobs: Number of parallel jobs to be used. Default is 10
+    :type mp_jobs: int, optional
+    :param kwargs: Additional keyword arguments
+    :type kwargs: dict
+    
+    :return: A list of lists of dataframes containing the evaluation results for each instance and setting configuration
+    :rtype: list[list[pd.DataFrame]]
     """
 
     if predict_proba is None:
@@ -144,14 +176,12 @@ class ExperimentRun:
     This class is used to store the metadata and results of an experiment run. It can be
     used to keep track of experimental settings, hyperparameters, and outcomes.
 
-    Attributes
-    ----------
-    metadata : dict
-        A dictionary containing metadata about the experiment run, such as
-        hyperparameters, dataset information, model configurations, etc.
-    results : any
-        The results of the experiment run. This can be any data type depending on
-        the specific experiment, such as metrics, model outputs, or evaluation results.
+    :ivar metadata: A dictionary containing metadata about the experiment run, such as
+                    hyperparameters, dataset information, model configurations, etc.
+    :vartype metadata: dict
+    :ivar results: The results of the experiment run. This can be any data type depending on
+                   the specific experiment, such as metrics, model outputs, or evaluation results.
+    :vartype results: any
     """
     metadata: dict
     results: any
@@ -163,18 +193,13 @@ def get_expconfig_mean_results(exp: ExperimentRun, config: int):
     This function aggregates all results for a given configuration in an experiment
     and computes the mean values grouped by the 0-level index.
     
-    Parameters
-    ----------
-    exp : ExperimentRun
-        The experiment run object containing results.
-    config : int
-        The configuration index to retrieve results for.
-    
-    Returns
-    -------
-    pandas.DataFrame
-        A DataFrame containing the mean values of all results for the specified
-        configuration, grouped by the 0-level index.
+    :param exp: The experiment run object containing results
+    :type exp: ExperimentRun
+    :param config: The configuration index to retrieve results for
+    :type config: int
+    :return: A DataFrame containing the mean values of all results for the specified
+             configuration, grouped by the 0-level index
+    :rtype: pandas.DataFrame
     """
     config_results = exp.results[config]
     return pd.concat(config_results).groupby(level=0).mean()
@@ -186,22 +211,18 @@ def count_worst_case_avoidances(config_results: list[pd.DataFrame], is_more_bett
     Count the number of dataframes in which the specified row avoids the worst-case scenario 
     across all columns, with varying levels of tolerance.
     
-    Parameters:
-    -----------
-    config_results : list[pd.DataFrame]
-        A list of pandas DataFrames containing the results to be analyzed.
-    is_more_better : list[bool]
-        A list of boolean values indicating whether a higher value is better (True) or a lower value is better (False) for each column.
-    not_avoidence_tolerance : int, optional
-        The tolerance level for not avoiding the worst case. Default is 0.
-    row_of_interest : str, optional
-        The index of the row to be analyzed. Default is "AggregateExplainer".
-        
-    Returns:
-    --------
-    counts : list[int]
-        A list of counts where each element represents the number of dataframes in which the row of interest 
-        avoids the worst-case scenario with the corresponding level of tolerance.
+    :param config_results: A list of pandas DataFrames containing the results to be analyzed.
+    :type config_results: list[pd.DataFrame]
+    :param is_more_better: A list of boolean values indicating whether a higher value is better (True) 
+                          or a lower value is better (False) for each column.
+    :type is_more_better: list[bool]
+    :param not_avoidence_tolerance: The tolerance level for not avoiding the worst case. Default is 0.
+    :type not_avoidence_tolerance: int, optional
+    :param row_of_interest: The index of the row to be analyzed. Default is "AggregateExplainer".
+    :type row_of_interest: str, optional
+    :return: A list of counts where each element represents the number of dataframes in which the row 
+            of interest avoids the worst-case scenario with the corresponding level of tolerance.
+    :rtype: list[int]
     """
     
     counts = [0] * (not_avoidence_tolerance + 1)
@@ -229,25 +250,21 @@ def count_worst_case_avoidances(config_results: list[pd.DataFrame], is_more_bett
 def get_average_metric_rank(config_results: list[pd.DataFrame], is_more_better: list[bool]):
     """
     Calculate the average rank of each method across multiple instances for each metric.
+    
     For each instance in config_results, ranks are assigned to methods based on their performance
     for each metric, considering whether higher or lower values are better. Then, the average
     rank across all instances is calculated.
     
-    Parameters
-    ----------
-    config_results : list[pd.DataFrame]
-        List of DataFrames where each DataFrame contains the results for one instance.
-        Each DataFrame should have methods as indices and metrics as columns.
-    is_more_better : list[bool]
-        List of boolean values indicating whether higher values are better for each metric.
-        True means higher values are better, False means lower values are better.
-        Length should match the number of columns in each DataFrame in config_results.
-        
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame containing the average rank of each method across all instances.
-        Methods are in the index, and metrics are in the columns.
+    :param config_results: List of DataFrames where each DataFrame contains the results for one instance.
+                          Each DataFrame should have methods as indices and metrics as columns.
+    :type config_results: list[pd.DataFrame]
+    :param is_more_better: List of boolean values indicating whether higher values are better for each metric.
+                          True means higher values are better, False means lower values are better.
+                          Length should match the number of columns in each DataFrame in config_results.
+    :type is_more_better: list[bool]
+    :return: DataFrame containing the average rank of each method across all instances.
+             Methods are in the index, and metrics are in the columns.
+    :rtype: pd.DataFrame
     """
     ranks = []
 
@@ -274,31 +291,24 @@ def present_experiment_run(exp: ExperimentRun, labels: list[Any], is_more_better
 
     This function displays the results for each method in the experiment, calculates worst-case
     avoidances, shows the average results, and computes average metric rankings.
-
-    Parameters
-    ----------
-    exp : ExperimentRun
-        The experiment run object containing results to be presented.
+    
+    :param exp: The experiment run object containing results to be presented
+    :type exp: ExperimentRun
+    :param labels: Labels for the different methods being compared in the experiment
+    :type labels: list
+    :param is_more_better: List of boolean flags indicating for each metric whether higher values are better.
+                          Defaults to [False, True, True]
+    :type is_more_better: list[bool], optional
+    :return: This function only prints and displays results, it doesn't return any value
+    :rtype: None
+    
+    .. note::
+        The function displays various performance metrics and statistics for each method:
         
-    labels : list
-        Labels for the different methods being compared in the experiment.
-        
-    is_more_better : list[bool], optional
-        List of boolean flags indicating for each metric whether higher values are better.
-        Defaults to [False, True, True].
-
-    Returns
-    -------
-    None
-        This function only prints and displays results, it doesn't return any value.
-
-    Notes
-    -----
-    The function displays various performance metrics and statistics for each method:
-    - Raw results
-    - Worst case avoidance counts (for all metrics and for 2/3 of metrics)
-    - Average results across experiment configurations
-    - Average rank for each metric
+        - Raw results
+        - Worst case avoidance counts (for all metrics and for 2/3 of metrics)
+        - Average results across experiment configurations  
+        - Average rank for each metric
     """
     for i, method in enumerate(labels):
         print(f"{method}:\n")

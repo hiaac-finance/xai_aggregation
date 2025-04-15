@@ -1,5 +1,9 @@
 """
-Definitions of tools used internally by the AggregatedExplainer
+Internal Tools
+==============
+
+This module provides tools and utilities for evaluating explanations and
+generating test data used by the AggregatedExplainer class.
 """
 
 import time
@@ -24,12 +28,6 @@ from tensorflow.keras.optimizers import Adam
 # Concunrrency:
 import concurrent.futures
 from pathos.multiprocessing import ProcessingPool as Pool
-# from .mp import NoDaemonProcessPool as Pool
-# from pathos.multiprocessing import ThreadPool as Pool
-# from multiprocessing import Pool as ProcessPool
-
-# import multiprocess.context as ctx
-# ctx._force_start_method('spawn')
 
 
 class AutoencoderNoisyDataGenerator():
@@ -40,6 +38,17 @@ class AutoencoderNoisyDataGenerator():
     between a sample and a randomly selected close neighbor. The neighbors are determined 
     by reducing the dimensionality of the data using an autoencoder and applying the 
     NearestNeighbors algorithm in the reduced space.
+    
+    :param X: The original dataset to generate noisy variations from
+    :type X: pandas.DataFrame
+    :param ohe_categorical_features_names: Names of categorical features that were one-hot encoded
+    :type ohe_categorical_features_names: list[str]
+    :param encoding_dim: Dimension of the encoded representation, defaults to 5
+    :type encoding_dim: int, optional
+    :param epochs: Number of epochs to train the autoencoder, defaults to 500
+    :type epochs: int, optional
+    :param percent_features_to_replace: Fraction of features to replace with noisy values, defaults to 0.1
+    :type percent_features_to_replace: float, optional
     """
 
     def __init__(self, X: pd.DataFrame, ohe_categorical_features_names: list[str], encoding_dim: int = 5, epochs=500, percent_features_to_replace: float = 0.1):
@@ -64,6 +73,11 @@ class AutoencoderNoisyDataGenerator():
         
     
     def fit(self):
+        """
+        Train the autoencoder model on the dataset.
+        
+        This method must be called before generating noisy data.
+        """
         self.autoencoder.compile(optimizer=Adam(), loss='mean_squared_error')
         self.autoencoder.fit(self.X_scaled, self.X_scaled, epochs=self.epochs, batch_size=32, shuffle=True, validation_split=0.2)
         # Extract hidden layer representation:
@@ -75,23 +89,16 @@ class AutoencoderNoisyDataGenerator():
         """
         Generate a DataFrame containing a noisy variation of the data.
 
-        Noise is introduced by swapping the values of a small number of features between a sample and a randomly selected close neighbor. 
-        Neighbors are determined using an autoencoder to reduce the dimensionality of the data, followed by the NearestNeighbors algorithm 
-        applied in the reduced space.
+        Noise is introduced by swapping values of features between a sample and a 
+        randomly selected close neighbor. Neighbors are determined using an autoencoder 
+        to reduce dimensionality, followed by the NearestNeighbors algorithm.
 
-        Parameters:
-        -----------
-            num_features_to_replace (int, optional): The number of features to replace with noisy values. If not provided, 
-                                                     it defaults to a percentage of the total features, as defined by 
-                                                     `self.replace_features_percent`.
-
-        Returns:
-        --------
-            pd.DataFrame: A DataFrame containing the noisy variation of the original data.
-
-        Raises:
-        -------
-            ValueError: If the autoencoder has not been fitted. Ensure the `fit()` method is called before generating noisy data.
+        :param num_features_to_replace: Number of features to replace with noisy values
+                                       If not provided, defaults to a percentage of total features
+        :type num_features_to_replace: int, optional
+        :return: DataFrame containing the noisy variation of the original data
+        :rtype: pandas.DataFrame
+        :raises ValueError: If the autoencoder has not been fitted
         """
 
         if not self.was_fit:
@@ -137,22 +144,33 @@ class AutoencoderNoisyDataGenerator():
 
 class ExplanationModelEvaluator:
     """
-    This class defines a set of metrics to evaluate an explantion model's performance on a given data instance. THIS CLASS MUST BE INITIALIZED BEFORE USE.
+    A class for evaluating explanation models using multiple performance metrics.
+    
+    This class defines metrics to evaluate an explanation model's performance on a given data instance.
+    This class must be initialized before use by calling the ``init()`` method.
 
-    The metrics are:
-    - Faithfullness correlation: The correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
-    - Sensitivity: The relationship (average difference or correlation) between the explanation of the instance and the explanation of a noisy version of the instance.
-    - Complexity: The complexity of the explanation, calculated as the entropy of the explanation's feature importance distribution.
-
-    The class can be used to evaluate the performance of different explanation methods, or to evaluate the performance of an aggregated explainer.
-
-    Attributes:
-    -----------
-        - clf (object): The classifier model that will be explained.
-        - X_train (pd.DataFrame | np.ndarray): The training data used to train the classifier.
-        - ohe_categorical_feature_names (list[str]): The names of the categorical features that were one-hot-encoded.
-        - predict_proba (callable): A function that receives a data row and returns the model's prediction probabilities.
-        - noise_gen_args (dict): A dictionary containing the arguments to be passed to the AutoencoderNoisyDataGenerator class.
+    :param model: The classifier model to be explained
+    :type model: object
+    :param X_train: The training data used to train the classifier
+    :type X_train: pandas.DataFrame or numpy.ndarray
+    :param ohe_categorical_feature_names: Names of categorical features that were one-hot encoded
+    :type ohe_categorical_feature_names: list[str], optional
+    :param predict_fn: Custom prediction function, defaults to model.predict_proba or model.predict
+    :type predict_fn: callable, optional
+    :param noise_gen_args: Arguments to be passed to the AutoencoderNoisyDataGenerator
+    :type noise_gen_args: dict, optional
+    :param debug: Whether to enable debug mode, defaults to False
+    :type debug: bool, optional
+    :param jobs: Number of parallel jobs to use, defaults to None
+    :type jobs: int, optional
+    
+    .. note::
+        The class provides the following evaluation metrics:
+        
+        * **Faithfulness correlation**: Correlation between feature importance and the effect of feature perturbation
+        * **Sensitivity**: Stability of explanations when input data is slightly perturbed
+        * **Complexity**: Entropy of the explanation's feature importance distribution
+        * **Non-redundant contribution (NRC)**: Metric assessing explanation conciseness and coherence
     """
 
     IS_METRIC_HIGHER_BETTER = {
@@ -192,8 +210,13 @@ class ExplanationModelEvaluator:
         self.was_initialized = False
         
     
-    # Initialization opeations that take a long time to run
     def init(self):
+        """
+        Initialize the evaluator.
+        
+        This method trains the noisy data generator and must be called before
+        using any evaluation methods.
+        """
         self.noisy_data_generator.fit()
         self.was_initialized = True
             
@@ -201,18 +224,32 @@ class ExplanationModelEvaluator:
                                   iterations: int = 100, baseline_strategy: Literal["zeros", "mean"] = "zeros", rank_based = False,
                                   rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "inverse", explanation: DataFrame[ExplanationModel] = None) -> float:
         """
-        This metric measures the correlation between the importance of the features in the explanation and the change in the model's output when the features are perturbed.
-        Referenced from: https://arxiv.org/abs/2005.00631
-
-        Parameters:
-        -----------
-            explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated. Must be passed if explanation is None.
-            instance_data_row (pd.Series): The instance to be explained. Must be passed if explanation is None.
-            explanation: The explanation of the instance. If None, the explainer will be used to generate the explanation, and both the explainer and the instance_data_row parameters must be passed.
-            len_subset (int): The number of features to perturb in each iteration. If None, the default value is len(instance_data_row)//4 (25% of the features).
-            iterations (int): The number of iterations to run the metric calculation. The higher the number of iterations, the more accurate the result.
-            baseline_strategy (str): The strategy to be used to generate the baseline values for the perturbed features. Options are "zeros" (all zeros) or "mean" (mean of the training data).
-                                     "mean" usually provides hihger correlation values, but "zeros" is more conservative.
+        Measure correlation between feature importance and model output changes when features are perturbed.
+        
+        This metric evaluates how well the explanation's feature importance scores align with
+        the actual impact of those features on the model's predictions.
+        
+        :param explainer: The explainer object or class to evaluate (must be provided if explanation is None)
+        :type explainer: ExplainerWrapper or Type[ExplainerWrapper]
+        :param instance_data_row: The instance to explain (must be provided if explanation is None)
+        :type instance_data_row: pandas.Series
+        :param len_subset: Number of features to perturb in each iteration (default: 25% of features)
+        :type len_subset: int, optional
+        :param iterations: Number of iterations for metric calculation
+        :type iterations: int, optional
+        :param baseline_strategy: Strategy for baseline values ("zeros" or "mean")
+        :type baseline_strategy: Literal["zeros", "mean"], optional
+        :param rank_based: Whether to use rank-based calculation
+        :type rank_based: bool, optional
+        :param rb_alg: Algorithm for rank-based calculation
+        :type rb_alg: Literal["sum", "percentile", "avg", "inverse"], optional
+        :param explanation: Pre-computed explanation (if provided, explainer won't be used)
+        :type explanation: DataFrame[ExplanationModel], optional
+        :return: Absolute Pearson correlation between feature importance and output changes
+        :rtype: float
+        
+        .. note::
+            "mean" baseline typically provides higher correlation values, but "zeros" is more conservative.
         """
 
         if explanation is None:
@@ -240,6 +277,20 @@ class ExplanationModelEvaluator:
 
     def _evaluate_faithfullness_iteration(self, instance_data_row, g_x, f_x, predicted_index, len_subset, baseline_strategy, rank_based: bool = False,
                                           rb_alg: Literal["sum", "percentile", "avg", "inverse"] = "inverse") -> tuple[float, float]:
+        """
+        Helper method to calculate a single faithfulness iteration.
+        
+        :param instance_data_row: The instance being explained
+        :param g_x: The explanation for the instance
+        :param f_x: The model's prediction for the instance
+        :param predicted_index: Index of the predicted class
+        :param len_subset: Number of features to perturb
+        :param baseline_strategy: Strategy for generating baseline values
+        :param rank_based: Whether to use rank-based calculation
+        :param rb_alg: Algorithm for rank-based calculation
+        :return: Tuple of (combined_importance, delta_f)
+        :rtype: tuple[float, float]
+        """
         subset = np.random.choice(instance_data_row.index.values, len_subset if len_subset else len(instance_data_row) // 4, replace=False)
         perturbed_instance = instance_data_row.copy()
 
@@ -280,21 +331,32 @@ class ExplanationModelEvaluator:
     def sensitivity(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson', 'mean_absolute'] = 'spearman',
                     custom_method: Callable[[pd.DataFrame, pd.DataFrame], float] = None, extra_explainer_params: dict = {}) -> float:
         """
-        Concurrent variation of the sensitivity method. This metric measures the relationship (average difference or correlation) between the explanation of the instance and the explanation of a noisy version of the instance.
-        The explainer is instantiated twice: once to explain the original instance and once to explain the noisy instance, since it may need to fit or train itself with the data.
+        Measure explanation stability when the input data is slightly perturbed.
         
-        Parameters:
-        -----------
-            - ExplainerType (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated.
-            - instance_data_row (pd.Series): The instance to be explained.
-            - iterations (int): The number of iterations to run the metric calculation. The higher the number of iterations, the more accurate the result.
-            - method (str): The method to be used to calculate the sensitivity. Options are "mean_squared", "spearman", and "pearson".
-            - custom_method (Callable[[pd.DataFrame, pd.DataFrame], float]): A custom method to calculate the sensitivity. If provided, the method parameter will be ignored.
-            - extra_explainer_params (dict): A dictionary containing the parameters to be passed to the explainer class, in case it requires additional parameters.
+        This method evaluates how sensitive an explainer is to small changes in the input data
+        by comparing explanations of the original instance and noisy versions.
         
-        Notes:
-        ------
-            Beware: depending on the method used, the metric can either be a cost function (the lower the better: mean_squared) or a reward function (the higher the better: spearman, person).
+        :param ExplainerType: The explainer object or class to be evaluated
+        :type ExplainerType: ExplainerWrapper or Type[ExplainerWrapper]
+        :param instance_data_row: The instance to be explained
+        :type instance_data_row: pandas.Series
+        :param iterations: Number of iterations for averaging results
+        :type iterations: int, optional
+        :param method: Method to calculate sensitivity ("mean_squared", "spearman", "pearson", or "mean_absolute") 
+        :type method: Literal['mean_squared', 'spearman', 'pearson', 'mean_absolute'], optional
+        :param custom_method: A custom method to calculate sensitivity (overrides method parameter)
+        :type custom_method: Callable[[pd.DataFrame, pd.DataFrame], float], optional
+        :param extra_explainer_params: Additional parameters for the explainer
+        :type extra_explainer_params: dict, optional
+        :return: Average sensitivity measure
+        :rtype: float
+        
+        .. note::
+            Depending on the method, lower values may be better (mean_squared, mean_absolute) or
+            higher values may be better (spearman, pearson). 
+        
+        .. warning::
+            Requires initialization via ``init()`` before use.
         """
 
         if not self.was_initialized:
@@ -320,6 +382,18 @@ class ExplanationModelEvaluator:
         return np.mean(results)
 
     def _evaluate_sensitivity_iteration(self, original_explainer: ExplainerWrapper, instance_data_row, ExplainerType: Type[ExplainerWrapper], method, custom_method, extra_explainer_params):
+        """
+        Helper method to evaluate a single sensitivity iteration.
+        
+        :param original_explainer: The explainer for the original data
+        :param instance_data_row: The instance to explain
+        :param ExplainerType: The explainer class
+        :param method: Metric calculation method
+        :param custom_method: Custom metric calculation function
+        :param extra_explainer_params: Additional explainer parameters
+        :return: Sensitivity score for the iteration
+        :rtype: float
+        """
         # Obtain the original explanation:
         original_explanation = original_explainer.explain_instance(instance_data_row)
 
@@ -350,7 +424,25 @@ class ExplanationModelEvaluator:
     def _sensitivity_sequential(self, ExplainerType: ExplainerWrapper | Type[ExplainerWrapper], instance_data_row: pd.Series, iterations: int = 10, method: Literal['mean_squared', 'spearman', 'pearson', 'mean_absolute'] = 'spearman',
                     custom_method: Callable[[pd.DataFrame, pd.DataFrame], float]=None, extra_explainer_params: dict = {}) -> float:
         """
-        Sequential version of sensitivity()
+        Sequential version of the sensitivity method.
+        
+        :param ExplainerType: The explainer object or class to be evaluated
+        :type ExplainerType: ExplainerWrapper or Type[ExplainerWrapper]
+        :param instance_data_row: The instance to be explained
+        :type instance_data_row: pandas.Series
+        :param iterations: Number of iterations for averaging results
+        :type iterations: int, optional
+        :param method: Method to calculate sensitivity
+        :type method: Literal['mean_squared', 'spearman', 'pearson', 'mean_absolute'], optional
+        :param custom_method: A custom method to calculate sensitivity
+        :type custom_method: Callable[[pd.DataFrame, pd.DataFrame], float], optional
+        :param extra_explainer_params: Additional parameters for the explainer
+        :type extra_explainer_params: dict, optional
+        :return: Average sensitivity measure
+        :rtype: float
+        
+        .. warning::
+            Requires initialization via ``init()`` before use.
         """
 
         if not self.was_initialized:
@@ -374,14 +466,21 @@ class ExplanationModelEvaluator:
     def complexity(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None,
                    explanation: DataFrame[ExplanationModel] = None, **kwargs) -> float:
         """
-        This metric is calculated as the entropy of the explanation's feature importance distribution.
-        Referenced from: https://arxiv.org/abs/2005.00631
+        Calculate the complexity of an explanation using entropy of feature importance distribution.
         
-        Parameters:
-        -----------
-            - explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated. Must be passed if explanation is None.
-            - instance_data_row (pd.Series): The instance to be explained. Must be passed if explanation is None.
-            - explanation: The explanation of the instance. If None, the explainer will be used to generate the explanation, and both the explainer and the instance_data_row parameters must be passed.
+        Higher entropy indicates higher complexity (more evenly distributed importance).
+        
+        :param explainer: The explainer object or class (required if explanation is None)
+        :type explainer: ExplainerWrapper or Type[ExplainerWrapper], optional
+        :param instance_data_row: The instance to explain (required if explanation is None)
+        :type instance_data_row: pandas.Series, optional
+        :param explanation: Pre-computed explanation 
+        :type explanation: DataFrame[ExplanationModel], optional
+        :return: Entropy-based complexity score
+        :rtype: float
+        
+        .. note::
+            Lower values indicate simpler explanations (more concentrated feature importance).
         """
         
         assert explanation is not None or (explainer is not None and instance_data_row is not None), "Either an explanation or both an explainer and an instance_data_row must be provided."
@@ -405,6 +504,23 @@ class ExplanationModelEvaluator:
     
     def nrc_old(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None, alpha: float = 0.5,
                 explanation: DataFrame[ExplanationModel] = None) -> float:
+        """
+        Legacy version of the NRC (Normalized Ratio of Complexity) metric.
+        
+        :param explainer: The explainer object or class (required if explanation is None)
+        :type explainer: ExplainerWrapper or Type[ExplainerWrapper], optional
+        :param instance_data_row: The instance to explain (required if explanation is None)
+        :type instance_data_row: pandas.Series, optional
+        :param alpha: Dispersion penalty factor
+        :type alpha: float, optional
+        :param explanation: Pre-computed explanation
+        :type explanation: DataFrame[ExplanationModel], optional
+        :return: NRC value
+        :rtype: float
+        
+        .. deprecated:: 1.0
+            Use :meth:`nrc` instead.
+        """
         assert explanation is not None or (explainer is not None and instance_data_row is not None), "Either an explanation or both an explainer and an instance_data_row must be provided."
         
         if explanation is None:
@@ -434,14 +550,24 @@ class ExplanationModelEvaluator:
     def nrc(self, explainer: ExplainerWrapper | Type[ExplainerWrapper] = None, instance_data_row: pd.Series = None, alpha: float = 0.5,
             explanation: DataFrame[ExplanationModel] = None) -> float:
         """
-        New proposed metric: NRC (Normalized Ratio of Complexity) with dispersion penalty.
+        Calculate NRC (Normalized Ratio of Complexity) with dispersion penalty.
         
-        Parameters:
-        -----------
-            - explainer (ExplainerWrapper | Type[ExplainerWrapper]): The explainer object or class to be evaluated. Must be passed if explanation is None.
-            - instance_data_row (pd.Series): The instance to be explained. Must be passed if explanation is None.
-            - alpha (float): The dispersion penalty factor. The higher the value, the more the metric will penalize explanations with high rank dispersion.
-            - explanation: The explanation of the instance. If None, the explainer will be used to generate the explanation, and both the explainer and the instance_data_row parameters must be passed.
+        This metric evaluates explanation conciseness and coherence, with higher
+        values indicating more concentrated and informative explanations.
+        
+        :param explainer: The explainer object or class (required if explanation is None)
+        :type explainer: ExplainerWrapper or Type[ExplainerWrapper], optional
+        :param instance_data_row: The instance to explain (required if explanation is None)
+        :type instance_data_row: pandas.Series, optional
+        :param alpha: Dispersion penalty factor (higher values penalize dispersed rankings more)
+        :type alpha: float, optional
+        :param explanation: Pre-computed explanation
+        :type explanation: DataFrame[ExplanationModel], optional
+        :return: NRC value (lower is better)
+        :rtype: float
+        
+        .. note::
+            Lower values indicate more focused explanations with less feature redundancy.
         """
         
         assert explanation is not None or (explainer is not None and instance_data_row is not None), "Either an explanation or both an explainer and an instance_data_row must be provided."
@@ -472,6 +598,14 @@ import pandera as pa
 from pandera.typing import DataFrame
 
 class RankedExplanationModel(pa.DataFrameModel):
+    """
+    Pandera schema for ranked explanations.
+    
+    :ivar feature: Feature name
+    :type feature: str
+    :ivar rank: Rank of the feature (higher rank = less important)
+    :type rank: int
+    """
     feature: str
     rank: int = pa.Field(ge=0)
 
@@ -479,23 +613,24 @@ def get_ranked_explanation(scored_explanation: DataFrame[ExplanationModel],
                            fraction: float = None, method: Literal["std", "spread"] = "std",
                            epsilon: float = None, invert: bool = False) -> DataFrame[RankedExplanationModel]:
     """
-    Assign ranks to features based on their scores, grouping features with similar scores.
-
-    Parameters
-    ----------
-    scored_explanation : DataFrame[ExplanationModel]
-        A DataFrame containing feature importance scores with two columns: 'feature' and 'score'.
-    fraction : float, optional
-        The fraction of the score range to use for calculating epsilon. Ignored if `epsilon` is provided.
-    method : str, optional
-        The method to calculate epsilon. Options are 'std' (standard deviation) or 'spread' (score range).
-    epsilon : float, optional
-        The epsilon value to determine score similarity. If provided, `fraction` is ignored.
-
-    Returns
-    -------
-    DataFrame[RankedExplanationModel]
-        A DataFrame containing features ('feature' column) and their respective ranks ('rank' column).
+    Assign ranks to features based on their scores, grouping similar-scored features.
+    
+    :param scored_explanation: DataFrame containing feature importance scores
+    :type scored_explanation: DataFrame[ExplanationModel]
+    :param fraction: Fraction of score range/std to use for epsilon calculation
+    :type fraction: float, optional
+    :param method: Method to calculate epsilon ("std" or "spread")
+    :type method: Literal["std", "spread"], optional
+    :param epsilon: Manual epsilon value to determine score similarity
+    :type epsilon: float, optional
+    :param invert: Whether to invert the ranks (making highest rank = 1)
+    :type invert: bool, optional
+    :return: DataFrame with features and their ranks
+    :rtype: DataFrame[RankedExplanationModel]
+    
+    .. note::
+        Features with score differences less than epsilon receive the same rank.
+        When ``invert=True``, the highest-scored feature gets rank 1.
     """
 
     # Calculating epsilon

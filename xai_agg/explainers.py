@@ -1,19 +1,49 @@
 """
-Wrapper classes for explainer algorithms.
+Explainer Wrappers
+=================
 
-This module provides a consistent interface to various explainer algorithms
-by wrapping them in the ExplainerWrapper abstract base class and its
-subclasses. Currently supports wrappers for LIME, SHAP (Tree and Kernel),
-and Anchor explainers.
+This module provides a consistent interface to various explainable AI (XAI) algorithms
+by wrapping them in the :class:`ExplainerWrapper` abstract base class and its
+subclasses. It offers uniform access to different explanation techniques, making them
+interchangeable in higher-level components like the aggregated explainer.
 
-Classes:
+Classes
+-------
+   - ExplanationModel
+   - ExplainerWrapper
+   - LimeWrapper
+   - ShapTabularTreeWrapper
+   - ShapTabularKernelWrapper
+   - AnchorWrapper
+
+Supported Explainer Types
+-------------------------
+
+- **LIME**: Local Interpretable Model-agnostic Explanations
+- **SHAP Tree**: Tree-based implementation of SHAP (SHapley Additive exPlanations)  
+- **SHAP Kernel**: Kernel-based implementation of SHAP for any model
+- **Anchor**: Rule-based explanations with high precision
+
+Examples
 --------
-    ExplanationModel: Pandera model for explanation data
-    ExplainerWrapper: Abstract base class for explainer wrappers
-    LimeWrapper: Wrapper for LIME explainer
-    ShapTabularTreeWrapper: Wrapper for SHAP Tree explainer
-    ShapTabularKernelWrapper: Wrapper for SHAP Kernel explainer
-    AnchorWrapper: Wrapper for Anchor explainer
+
+.. code-block:: python
+
+    import pandas as pd
+    from sklearn.ensemble import RandomForestClassifier
+    from xai_agg.explainers import LimeWrapper, ShapTabularTreeWrapper
+    
+    # Train a model
+    model = RandomForestClassifier()
+    model.fit(X_train, y_train)
+    
+    # Create a LIME explainer
+    lime_explainer = LimeWrapper(model=model, X_train=X_train)
+    
+    # Explain a prediction
+    instance = X_test.iloc[0]
+    explanation = lime_explainer.explain_instance(instance)
+    print(explanation)
 """
 
 import shap
@@ -35,10 +65,38 @@ class ExplanationModel(pa.DataFrameModel):
 
 class ExplainerWrapper:
     """
-    Wrapper abstract base class for featuer-importance-based explainer classes.
+    Abstract base class providing a uniform interface for feature-importance explainers.
     
-    This class ensures that all explainer classes have the same interface, making it
-    easier to use them interchangeably in the AggregatedExplainer class.
+    This class serves as a foundation for wrapping various explainable AI (XAI) algorithms,
+    ensuring they share a common interface. This standardization makes different explanation
+    techniques interchangeable in higher-level components like the AggregatedExplainer.
+    
+    :param model: The machine learning model to be explained
+    :type model: Any
+    :param X_train: Training data used to initialize the explainer
+    :type X_train: pandas.DataFrame or numpy.ndarray
+    :param categorical_feature_names: Names of categorical features in the dataset
+    :type categorical_feature_names: list[str], optional
+    :param predict_fn: Custom prediction function, defaults to model.predict_proba or model.predict
+    :type predict_fn: callable, optional
+    :param mode: Prediction type ('classification', 'regression', or 'auto'), defaults to 'auto'
+    :type mode: Literal["classification", "regression", "auto"], optional
+    :param abs_score: Whether to return absolute values for feature importance scores, defaults to True
+    :type abs_score: bool, optional
+    :param additional_args: Additional arguments to pass to the underlying explainer
+    :type additional_args: dict, optional
+    
+    :ivar model: The machine learning model being explained
+    :ivar predict_fn: Function used to make predictions
+    :ivar mode: Prediction type ('classification' or 'regression')
+    :ivar X_train: Training data used to initialize the explainer
+    :ivar categorical_feature_names: Names of categorical features
+    :ivar abs_score: Whether absolute values are used for feature importance scores
+    :ivar additional_args: Additional arguments passed to the underlying explainer
+    
+    .. note::
+        Subclasses must implement the `explain_instance` method to provide
+        specific explanation functionality.
     """
 
     def __init__(self, model: any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
@@ -74,8 +132,21 @@ class ExplainerWrapper:
     
     def explain_instance(self, instance_data_row: pd.Series | np.ndarray) -> DataFrame[ExplanationModel]:
         """
-        Explains the prediction of a single instance. Must return a DataFrame with two columns: 'feature' and 'score',
-        where 'feature' is the name of the feature and 'score' is the absolute feature importance score.
+        Explains the prediction for a single instance.
+        
+        This abstract method must be implemented by subclasses to provide specific
+        explanation functionality. The implementation should process the instance
+        and return feature importance scores.
+        
+        :param instance_data_row: The instance to explain
+        :type instance_data_row: pandas.Series or numpy.ndarray
+        :return: A DataFrame with two columns: 'feature' (feature names) and 'score' 
+                (feature importance values)
+        :rtype: DataFrame[ExplanationModel]
+        
+        .. note::
+            If self.abs_score is True, all feature importance scores should be
+            returned as absolute values.
         """
         pass
 
@@ -150,9 +221,38 @@ class ShapTabularKernelWrapper(ExplainerWrapper):
 
 class AnchorWrapper(ExplainerWrapper):
     """
-    Anchor is not a feature-importance-based explainer, but it can be used to generate feature importance scores based on the rules that it generates.
-    This is done by calculating the coverage of each rule and assigning a score to each feature based on the coverage of the rules that don't reference it:
-    the lower the coverage, the more impactful the feature is, thus the higher the score.
+    Wrapper for the Anchor explainer, converting rule-based explanations to feature importance scores.
+    
+    Anchor typically generates rule-based explanations, not feature importance scores. This wrapper
+    converts Anchor's rules into a feature importance format by calculating the coverage of each rule
+    and assigning scores to features based on rule coverage: the lower the coverage, the more
+    impactful the feature is considered to be (thus the higher the score).
+    
+    :param model: The machine learning model to be explained
+    :type model: Any
+    :param X_train: Training data used to initialize the explainer
+    :type X_train: pandas.DataFrame or numpy.ndarray
+    :param categorical_feature_names: Names of categorical features in the dataset
+    :type categorical_feature_names: list[str], optional
+    :param predict_fn: Custom prediction function, defaults to model.predict_proba or model.predict
+    :type predict_fn: callable, optional
+    :param mode: Prediction type ('classification', 'regression', or 'auto'), defaults to 'auto'
+    :type mode: Literal["classification", "regression", "auto"], optional
+    :param abs_score: Whether to return absolute values for feature importance scores, defaults to True
+    :type abs_score: bool, optional
+    :param additional_args: Additional arguments to pass to the underlying explainer
+    :type additional_args: dict, optional
+    
+    :raises ValueError: If rule parsing fails due to invalid column names in the data
+    
+    .. note::
+       This wrapper requires data column names to be valid Python variable names/identifiers.
+       Column names should not start with numbers and should not contain spaces or 
+       special characters that would make them invalid in Python syntax.
+       
+    .. warning::
+       The rule extraction method may not work correctly for column names that have
+       spaces or don't contain any alphabetic characters.
     """
 
     def __init__(self, model: Any, X_train: pd.DataFrame | np.ndarray, categorical_feature_names: list[str] = [], predict_fn: callable = None,
