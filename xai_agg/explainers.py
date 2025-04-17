@@ -1,6 +1,6 @@
 """
 Explainer Wrappers
-=================
+==================
 
 This module provides a consistent interface to various explainable AI (XAI) algorithms
 by wrapping them in the :class:`ExplainerWrapper` abstract base class and its

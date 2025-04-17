@@ -152,11 +152,12 @@ class AggregatedExplainer(ExplainerWrapper):
             3. Computes performance metrics for each explainer.
             4. Determines aggregation weights based on the computed metrics.
             5. Fuses the individual runs using the specified aggregation algorithm.
-        
+
         :param instance_data_row: The instance to explain, represented as a pandas Series.
         :type instance_data_row: pandas.Series
         :return: A DataFrame containing the aggregated explanation, with features as rows and their importance scores as values.
         :rtype: pandas.DataFrame
+
         .. note::
             The method stores the individual explainer results in ``last_explanation_components``
             and the computed metrics in ``_last_explanation_metrics`` for later inspection.

@@ -17,7 +17,6 @@ Reference index
     :undoc-members:
     :show-inheritance:
 
-
 .. automodule:: xai_agg.explainers
     :members:
     :undoc-members:
