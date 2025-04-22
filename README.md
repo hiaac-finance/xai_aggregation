@@ -1,8 +1,5 @@
 <a id="readme-top"></a>
 
-![GitHub repo size](https://img.shields.io/github/repo-size/hiaac-finance/xai_aggregation?style=for-the-badge)
-![GitHub stars count](https://img.shields.io/github/stars/hiaac-finance/xai_aggregation)
-
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
@@ -12,6 +9,15 @@
 
   <p align="center">
     A python package for a rank based, multi-criteria aggregation method for explainable AI models.
+    <div align="center">
+      <img src="https://img.shields.io/github/repo-size/hiaac-finance/xai_aggregation" alt="Repo Size">
+      <img src="https://img.shields.io/github/stars/hiaac-finance/xai_aggregation" alt="Stars">
+      <img src="https://img.shields.io/pypi/v/xai-agg" alt="PyPI Version">
+      <img src="https://img.shields.io/pypi/pyversions/xai-agg" alt="Python Versions">
+      <img src="https://img.shields.io/github/license/hiaac-finance/xai_aggregation" alt="License">
+      <img src="https://img.shields.io/readthedocs/xai-agg" alt="Documentation Status">
+      <img src="https://img.shields.io/github/actions/workflow/status/hiaac-finance/xai_aggregation/python-package.yml" alt="Build Status">
+    </div>
     <br />
     <br />
     <a href="https://xai-agg.readthedocs.io/en/latest/">Read the Docs</a>
