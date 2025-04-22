@@ -12,3 +12,4 @@ pymcdm
 ranx
 xlrd
 pandera
+ipython
