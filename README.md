@@ -1,7 +1,7 @@
 <a id="readme-top"></a>
 
 ![GitHub repo size](https://img.shields.io/github/repo-size/hiaac-finance/xai_aggregation?style=for-the-badge)
-![GitHub stars count](https://img.shields.io/github/stars/hiaac-finance/xai_aggregation?style=for-the-badge)
+![GitHub stars count](https://img.shields.io/github/stars/hiaac-finance/xai_aggregation)
 
 <!-- PROJECT LOGO -->
 <br />
