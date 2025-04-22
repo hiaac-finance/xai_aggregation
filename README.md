@@ -7,7 +7,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/hiaac-finance/xai_aggregation">
-    <img src="resources/logo-black.png" alt="Logo" height="150" width="80">
+    <img src="resources/logo-black.png" alt="Logo" height="150">
   </a>
 
   <p align="center">
