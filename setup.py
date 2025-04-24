@@ -2,7 +2,7 @@ from pathlib import Path
 
 import setuptools
 
-VERSION = "0.0.1"
+VERSION = "0.1.0"
 
 NAME = "xai-agg"
 
@@ -36,9 +36,7 @@ setuptools.setup(
     },
     author="Everton Colombo",
     author_email="everton.colombo@students.ic.unicamp.br",
-    # Snowpark requires Python 3.8
-    python_requires=">=3.8",
-    # Requirements
+    python_requires=">=3.10",
     install_requires=INSTALL_REQUIRES,
     packages=["xai_agg"],
     long_description=Path("README.md").read_text(),
