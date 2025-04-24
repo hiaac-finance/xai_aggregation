@@ -35,3 +35,6 @@ reducing explanations’ variability, very limited research employed a multi-cri
 
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Installation
+Run `pip install xai-agg` to install the package.
