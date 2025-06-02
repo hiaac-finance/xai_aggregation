@@ -19,7 +19,7 @@
     <br />
     <a href="https://xai-agg.readthedocs.io/en/latest/">Read the Docs</a>
     ·
-    <a href="">Paper</a>
+    <a href="https://arxiv.org/abs/2505.24612">Paper</a>
   </p>
 </div>
 
