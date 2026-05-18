@@ -8,7 +8,7 @@
   </a>
 
   <p align="center">
-    A python package for a rank based, multi-criteria aggregation method for explainable AI models.
+    A python package for a rank based, multi-criteria aggregation method for post-hoc ML explanation models.
     <div align="center">
       <img src="https://img.shields.io/github/repo-size/hiaac-finance/xai_aggregation" alt="Repo Size">
       <img src="https://img.shields.io/github/stars/hiaac-finance/xai_aggregation" alt="Stars">
